@@ -2,6 +2,7 @@
 
 #include "Common/d3dUtil.h"
 #include "Common/MathHelper.h"
+#include "ImmerseObject.h"
 #include "Common/UploadBuffer.h"
 
 struct ObjectConstants
@@ -15,7 +16,7 @@ struct ObjectConstants
 };
 
 
-struct InstanceData
+/*struct InstanceData
 {
 	DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
 	DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
@@ -23,7 +24,7 @@ struct InstanceData
 	UINT InstancePad0;
 	UINT InstancePad1;
 	UINT InstancePad2;
-};
+};*/
 
 struct PassConstants
 {
@@ -33,6 +34,7 @@ struct PassConstants
     DirectX::XMFLOAT4X4 InvProj = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 ViewProj = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 InvViewProj = MathHelper::Identity4x4();
+	DirectX::XMFLOAT4X4 ViewProjTex = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 ShadowTransform = MathHelper::Identity4x4();
     DirectX::XMFLOAT3 EyePosW = { 0.0f, 0.0f, 0.0f };
     float cbPerObjectPad1 = 0.0f;
@@ -67,6 +69,25 @@ struct MaterialData
 	UINT MaterialPad2;
 };
 
+struct SsaoConstants
+{
+	DirectX::XMFLOAT4X4 Proj;
+	DirectX::XMFLOAT4X4 InvProj;
+	DirectX::XMFLOAT4X4 ProjTex;
+	DirectX::XMFLOAT4   OffsetVectors[14];
+
+	// For SsaoBlur.hlsl
+	DirectX::XMFLOAT4 BlurWeights[3];
+
+	DirectX::XMFLOAT2 InvRenderTargetSize = { 0.0f, 0.0f };
+
+	// Coordinates given in view space.
+	float OcclusionRadius = 0.5f;
+	float OcclusionFadeStart = 0.2f;
+	float OcclusionFadeEnd = 2.0f;
+	float SurfaceEpsilon = 0.05f;
+};
+
 struct Vertex
 {
     DirectX::XMFLOAT3 Pos;
@@ -93,8 +114,8 @@ public:
     // We cannot update a cbuffer until the GPU is done processing the commands
     // that reference it.  So each frame needs their own cbuffers.
     std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
-    std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
-
+	std::unique_ptr<UploadBuffer<SsaoConstants>> SsaoCB = nullptr;
+	std::unique_ptr<UploadBuffer<ImmerseObject>> ImmerseObjectBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<MaterialData>> MaterialBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<InstanceData>> InstanceBuffer = nullptr;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> renderItemBuffers;

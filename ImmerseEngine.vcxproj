@@ -27,8 +27,10 @@
     <ClCompile Include="Common\GeometryGenerator.cpp" />
     <ClCompile Include="Common\MathHelper.cpp" />
     <ClCompile Include="FrameResource.cpp" />
+    <ClCompile Include="ImmerseObject.cpp" />
     <ClCompile Include="MainApp.cpp" />
     <ClCompile Include="ShadowMap.cpp" />
+    <ClCompile Include="Ssao.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\Camera.h" />
@@ -41,7 +43,9 @@
     <ClInclude Include="Common\MathHelper.h" />
     <ClInclude Include="Common\UploadBuffer.h" />
     <ClInclude Include="FrameResource.h" />
+    <ClInclude Include="ImmerseObject.h" />
     <ClInclude Include="ShadowMap.h" />
+    <ClInclude Include="Ssao.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
