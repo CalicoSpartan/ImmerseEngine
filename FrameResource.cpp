@@ -6,10 +6,16 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT maxInsta
 	ThrowIfFailed(device->CreateCommandAllocator(
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
 		IID_PPV_ARGS(CmdListAlloc.GetAddressOf())));
+	mainDevice = device;
+	mainPassCount = passCount;
+	mainMaxInstanceCount = maxInstanceCount;
+	mainMaterialCount = materialCount;
+	mainNumRenderItems = numRenderItems;
 
 	PassCB = std::make_unique<UploadBuffer<PassConstants>>(device, passCount, true);
 	SsaoCB = std::make_unique<UploadBuffer<SsaoConstants>>(device, 1, true);
-	ImmerseObjectBuffer = std::make_unique<UploadBuffer<ImmerseObject>>(device, 4, false);
+	ImmerseObjectBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, 4, false);
+	EditorGUIBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, 4, false);
 	MaterialBuffer = std::make_unique<UploadBuffer<MaterialData>>(device, materialCount, false);
 	for (UINT i = 0; i < numRenderItems; i++)
 	{

@@ -16,6 +16,9 @@
     <Filter Include="Common">
       <UniqueIdentifier>{e81fd2db-531a-40aa-9ffc-ded451208c39}</UniqueIdentifier>
     </Filter>
+    <Filter Include="EditorGUI">
+      <UniqueIdentifier>{7c0333d0-2c6a-4519-bb1d-3c05d3d75731}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Common\Camera.cpp">
@@ -53,6 +56,12 @@
     </ClCompile>
     <ClCompile Include="ImmerseObject.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PanelGUI.cpp">
+      <Filter>EditorGUI</Filter>
+    </ClCompile>
+    <ClCompile Include="ButtonGUI.cpp">
+      <Filter>EditorGUI</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -94,6 +103,15 @@
     </ClInclude>
     <ClInclude Include="Ssao.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ButtonGUI.h">
+      <Filter>EditorGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="EditorGUIincludes.h">
+      <Filter>EditorGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="PanelGUI.h">
+      <Filter>EditorGUI</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

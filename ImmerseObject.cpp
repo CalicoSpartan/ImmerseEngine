@@ -14,4 +14,9 @@ ImmerseObject::ImmerseObject(std::string newName, DirectX::XMMATRIX world, Direc
 	MatIndex = matIndex;
 	bIs2D = false;
 	instanceBufferIndex = 0;
+	Instances.resize(1);
+	XMStoreFloat4x4(&Instances[0].World, world);
+	XMStoreFloat4x4(&Instances[0].TexTransform, texTransform);
+
 }
+

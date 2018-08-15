@@ -23,6 +23,7 @@ class ImmerseObject
 
 public:
 	ImmerseObject(std::string newName,DirectX::XMMATRIX world,DirectX::XMMATRIX texTransform,Material* mat,MeshGeometry* geo,UINT indexCount,UINT startIndexLocation,int baseVertexLocation,UINT matIndex, UINT instanceCount);
+	ImmerseObject() = default;
 	std::string name;
 	XMFLOAT4X4 World;
 	bool bIs2D;

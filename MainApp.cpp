@@ -13,6 +13,7 @@
 #include "Ssao.h"
 #include <string>
 #include "ShadowMap.h"
+#include "EditorGUIincludes.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -23,6 +24,32 @@ using namespace DirectX::PackedVector;
 
 const int gNumFrameResources = 3;
 
+
+struct test
+{
+	test() = default;
+	test(const test& rhs) = delete;
+	std::string name;
+	XMFLOAT4X4 World;
+	bool bIs2D;
+	XMFLOAT4X4 TexTransform;
+	UINT instanceBufferIndex;
+	BoundingBox Bounds;
+	UINT MatIndex;
+	std::vector<InstanceData> Instances;
+
+	Material* Mat = nullptr;
+	MeshGeometry* Geo = nullptr;
+
+	// Primitive topology.
+	D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+
+	// DrawIndexedInstanced parameters.
+	UINT IndexCount = 0;
+	UINT InstanceCount = 0;
+	UINT StartIndexLocation = 0;
+	int BaseVertexLocation = 0;
+};
 
 // Lightweight structure stores parameters to draw a shape.  This will
 // vary from app-to-app.
@@ -37,12 +64,12 @@ struct RenderItem
     XMFLOAT4X4 World = MathHelper::Identity4x4();
 	bool bIs2D = false;
 	XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
-
+	
 	// Dirty flag indicating the object data has changed and we need to update the constant buffer.
 	// Because we have an object cbuffer for each FrameResource, we have to apply the
 	// update to each FrameResource.  Thus, when we modify obect data we should set 
 	// NumFramesDirty = gNumFrameResources so that each frame resource gets the update.
-	int NumFramesDirty = gNumFrameResources;
+	//int NumFramesDirty = gNumFrameResources;
 	//index into array of instance buffers in a frameresource
 	UINT instanceBufferIndex = 0;
 	// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
@@ -76,7 +103,8 @@ enum class RenderLayer : int
     Debug = 1,
 	Sky = 2,
 	Rendered = 3,
-	Count = 4
+	EditorGUI = 4,
+	Count = 5
 	
 };
 
@@ -129,10 +157,12 @@ private:
     void BuildFrameResources();
     void BuildMaterials();
     void BuildRenderItems();
+	void DrawEditorGUI(ID3D12GraphicsCommandList* cmdList, std::vector<std::unique_ptr<MeshGeometry>>& guiGeometries);
     void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems);
 	void DrawImmerseObjects(ID3D12GraphicsCommandList* cmdList, const std::vector<ImmerseObject*>& iObjects);
     void DrawSceneToShadowMap();
 	void DrawNormalsAndDepth();
+	void BuildEditorGUI();
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE GetCpuSrv(int index)const;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE GetGpuSrv(int index)const;
@@ -152,6 +182,7 @@ private:
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	
 	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+	std::vector<std::unique_ptr<MeshGeometry>> mGUIGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
 	std::unordered_map<std::string, std::unique_ptr<Texture>> mTextures;
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
@@ -163,7 +194,9 @@ private:
 	
 	// List of all the render items.
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
+	std::vector < std::unique_ptr<ImmerseObject>> mImmerseObjects;
 	std::vector<ImmerseObject*> mAllImmerseObjects;
+	std::unordered_map<std::string, std::unique_ptr<ImmerseObject>> mImmerseObjectMap;
 	
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mRitemLayer[(int)RenderLayer::Count];
@@ -299,6 +332,7 @@ bool MainApp::Initialize()
 	CreatePlayerView();
     BuildShadersAndInputLayout();
     BuildShapeGeometry();
+	BuildEditorGUI();
     BuildSkullGeometry();
 	BuildBoxModel();
 	BuildMaterials();
@@ -437,7 +471,7 @@ void MainApp::Draw(const GameTimer& gt)
 
 	//
 	// Main rendering pass.
-	//
+	//on
 	
 	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
 
@@ -472,12 +506,17 @@ void MainApp::Draw(const GameTimer& gt)
 
     mCommandList->SetPipelineState(mPSOs["opaque"].Get());
     DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	
+	DrawImmerseObjects(mCommandList.Get(), mAllImmerseObjects);
 
     mCommandList->SetPipelineState(mPSOs["debug"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Debug]);
 
 	mCommandList->SetPipelineState(mPSOs["sky"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
+
+	mCommandList->SetPipelineState(mPSOs["EditorGUI"].Get());
+	DrawEditorGUI(mCommandList.Get(), mGUIGeometries);
 
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -513,18 +552,62 @@ void MainApp::OnMouseDown(WPARAM btnState, int x, int y)
 
 void MainApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
-	auto testObject = std::make_unique<ImmerseObject>(
-		"testBox",
-		XMMatrixScaling(2.0f, 2.0f, 2.0f)*XMMatrixTranslation(0.0f, 4.0f, 0.0f),
-		XMMatrixScaling(1.0f, 1.0f, 1.0f),
-		mMaterials["bricks0"].get(),
-		mGeometries["shapeGeo"].get(),
-		mGeometries["shapeGeo"].get()->DrawArgs["box"].IndexCount,
-		mGeometries["shapeGeo"].get()->DrawArgs["box"].StartIndexLocation,
-		mGeometries["shapeGeo"].get()->DrawArgs["box"].BaseVertexLocation,
-		0,
-		1
-		);
+	//check if an instance of the object has already been created
+	//if there is no created instance, create the object
+	//if there is a created instance, resize the object's instance array, increase its instance count and set the last instance 
+	/*
+	bool contains = false;
+	UINT index;
+	for (UINT i = 0; i < (UINT)mImmerseObjects.size(); i++)
+	{
+		if (mImmerseObjects[i].get()->name == "testBox")
+		{
+			index = i;
+			contains = true;
+			break;
+
+		}
+	}
+	if (!contains)
+	{
+		auto testObject = std::make_unique<ImmerseObject>(
+			"testBox",
+			XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f),
+			XMMatrixScaling(1.0f, 1.0f, 1.0f),
+			mMaterials["bricks0"].get(),
+			mGeometries["shapeGeo"].get(),
+			mGeometries["shapeGeo"].get()->DrawArgs["box"].IndexCount,
+			mGeometries["shapeGeo"].get()->DrawArgs["box"].StartIndexLocation,
+			mGeometries["shapeGeo"].get()->DrawArgs["box"].BaseVertexLocation,
+			0,
+			1
+			);
+		
+		mAllImmerseObjects.push_back(testObject.get());
+		mImmerseObjects.push_back(std::move(testObject));
+	}
+	else
+	{
+		
+		auto blah = mImmerseObjects[index].get();
+		blah->InstanceCount += 1;
+		blah->Instances.resize(blah->Instances.size() + 1);
+		XMStoreFloat4x4(&blah->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
+		XMStoreFloat4x4(&blah->Instances.back().TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+		blah->Instances.back().MaterialIndex = 0;
+		
+	}
+	*/
+
+	/*
+	auto test = mAllRitems[3].get();
+	test->Instances.resize(test->Instances.size() + 1);
+	XMStoreFloat4x4(&test->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
+	XMStoreFloat4x4(&test->Instances.back().TexTransform, XMMatrixScaling(1.5f, 2.0f, 1.0f));
+	test->Instances.back().MaterialIndex = 0;
+	
+	*/
+	
     ReleaseCapture();
 }
 
@@ -620,7 +703,49 @@ void MainApp::UpdateInstanceData(const GameTimer & gt)
 
 
 	}
-		
+
+	
+	for (auto& e : mAllImmerseObjects)
+	{
+
+		const auto& instanceData = e->Instances;
+		auto currInstanceBuffer = mCurrFrameResource->ImmerseObjectBuffer.get();
+		int visibleInstanceCount = 0;
+
+		for (UINT i = 0; i < (UINT)instanceData.size(); ++i)
+		{
+
+			XMMATRIX world = XMLoadFloat4x4(&instanceData[i].World);
+			XMMATRIX texTransform = XMLoadFloat4x4(&instanceData[i].TexTransform);
+
+			XMMATRIX invWorld = XMMatrixInverse(&XMMatrixDeterminant(world), world);
+
+			// View space to the object's local space.
+			XMMATRIX viewToLocal = XMMatrixMultiply(invView, invWorld);
+
+			// Transform the camera frustum from view space to the object's local space.
+			BoundingFrustum localSpaceFrustum;
+			mCamFrustum.Transform(localSpaceFrustum, viewToLocal);
+
+			// Perform the box/frustum intersection test in local space.
+
+			InstanceData data;
+			XMStoreFloat4x4(&data.World, XMMatrixTranspose(world));
+			XMStoreFloat4x4(&data.TexTransform, XMMatrixTranspose(texTransform));
+			data.MaterialIndex = instanceData[i].MaterialIndex;
+
+
+			// Write the instance data to structured buffer for the visible objects.
+			currInstanceBuffer->CopyData(visibleInstanceCount++, data);
+
+		}
+
+
+		e->InstanceCount = visibleInstanceCount;
+
+
+	}
+	
 	
 
 
@@ -1506,6 +1631,9 @@ void MainApp::BuildShadersAndInputLayout()
 	mShaders["skyVS"] = d3dUtil::CompileShader(L"Shaders\\Sky.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["skyPS"] = d3dUtil::CompileShader(L"Shaders\\Sky.hlsl", nullptr, "PS", "ps_5_1");
 
+	mShaders["editorVS"] = d3dUtil::CompileShader(L"Shaders\\EditorGUI.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["editorPS"] = d3dUtil::CompileShader(L"Shaders\\EditorGUI.hlsl", nullptr, "PS", "ps_5_1");
+
     mInputLayout =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -2033,6 +2161,19 @@ void MainApp::BuildPSOs()
     };
     ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&mPSOs["debug"])));
 
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC editorPsoDesc = debugPsoDesc;
+	editorPsoDesc.VS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["editorVS"]->GetBufferPointer()),
+		mShaders["editorVS"]->GetBufferSize()
+	};
+	editorPsoDesc.PS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["editorPS"]->GetBufferPointer()),
+		mShaders["editorPS"]->GetBufferSize()
+	};
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&editorPsoDesc, IID_PPV_ARGS(&mPSOs["EditorGUI"])));
+
 	//
 	// PSO for sky.
 	//
@@ -2065,7 +2206,7 @@ void MainApp::BuildFrameResources()
     for(int i = 0; i < gNumFrameResources; ++i)
     {
         mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
-            3, 6, (UINT)mMaterials.size(),4));
+            3, 200, (UINT)mMaterials.size(),4));
     }
 }
 
@@ -2282,6 +2423,40 @@ void MainApp::BuildRenderItems()
 	mRitemLayer[(int)RenderLayer::Opaque].push_back(leftCylRitem.get());
 	mAllRitems.push_back(std::move(leftCylRitem));
 	/*
+	auto testObject = std::make_unique<ImmerseObject>(
+		"testBox",
+		XMMatrixScaling(2.0f, 2.0f, 2.0f)*XMMatrixTranslation(0.0f, 4.0f, 0.0f),
+		XMMatrixScaling(1.0f, 1.0f, 1.0f),
+		mMaterials["bricks0"].get(),
+		mGeometries["shapeGeo"].get(),
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].IndexCount,
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].StartIndexLocation,
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].BaseVertexLocation,
+		0,
+		1
+		);
+		*/
+	/*
+	auto testObject = std::make_unique<test>();
+	testObject->name = "testBox";
+	XMStoreFloat4x4(&testObject->World, XMMatrixScaling(2.0f, 1.0f, 2.0f)*XMMatrixTranslation(0.0f, 0.5f, 0.0f));
+	XMStoreFloat4x4(&testObject->TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	testObject->Mat = mMaterials["bricks0"].get();
+	testObject->Geo = mGeometries["shapeGeo"].get();
+	testObject->IndexCount = testObject->Geo->DrawArgs["box"].IndexCount;
+	testObject->StartIndexLocation = testObject->Geo->DrawArgs["box"].StartIndexLocation;
+	testObject->BaseVertexLocation = testObject->Geo->DrawArgs["box"].BaseVertexLocation;
+	testObject->MatIndex = 0;
+	testObject->InstanceCount = 1;
+	testObject->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	testObject->Instances.resize(1);
+	testObject->Instances[0].MaterialIndex = 0;
+	XMStoreFloat4x4(&testObject->Instances[0].TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	XMStoreFloat4x4(&testObject->Instances[0].World, XMMatrixScaling(2.0f, 1.0f, 2.0f)*XMMatrixTranslation(0.0f, 0.5f, 0.0f));
+	mAllImmerseObjects.push_back(testObject.get());
+	mImmerseObjects.push_back(std::move(testObject));
+	*/
+	/*
 	auto wallRitem = std::make_unique<RenderItem>();
 	wallRitem->World = MathHelper::Identity4x4();
 	//XMStoreFloat4x4(&wallRitem->World, XMMatrixTranslation(5, 1, 0));
@@ -2339,6 +2514,20 @@ void MainApp::BuildRenderItems()
 
 }
 
+void MainApp::DrawEditorGUI(ID3D12GraphicsCommandList * cmdList, std::vector<std::unique_ptr<MeshGeometry>>& guiGeometries)
+{
+	for (size_t i = 0; i < guiGeometries.size(); ++i)
+	{
+		auto gui = guiGeometries[i].get();
+		cmdList->IASetVertexBuffers(0, 1, &gui->VertexBufferView());
+		cmdList->IASetIndexBuffer(&gui->IndexBufferView());
+		cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		auto instanceBuffer = mCurrFrameResource->EditorGUIBuffer->Resource();
+		cmdList->SetGraphicsRootShaderResourceView(0, instanceBuffer->GetGPUVirtualAddress());
+		cmdList->DrawIndexedInstanced(6, 1, gui->DrawArgs["leftPanel"].StartIndexLocation, gui->DrawArgs["leftPanel"].BaseVertexLocation, 0);
+	}
+}
+
 void MainApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
 
@@ -2362,14 +2551,22 @@ void MainApp::DrawImmerseObjects(ID3D12GraphicsCommandList* cmdList, const std::
 {
 	for (size_t i = 0; i < iObjects.size(); ++i)
 	{
+		
 		auto iO = iObjects[i];
+
 		cmdList->IASetVertexBuffers(0, 1, &iO->Geo->VertexBufferView());
+
 		cmdList->IASetIndexBuffer(&iO->Geo->IndexBufferView());
+
 		cmdList->IASetPrimitiveTopology(iO->PrimitiveType);
-		auto instanceBuffer = mCurrFrameResource->renderItemBuffers[iO->instanceBufferIndex]->Resource();
+
+		auto instanceBuffer = mCurrFrameResource->ImmerseObjectBuffer->Resource();
+
 		cmdList->SetGraphicsRootShaderResourceView(0, instanceBuffer->GetGPUVirtualAddress());
+
 		cmdList->DrawIndexedInstanced(iO->IndexCount, iO->InstanceCount, iO->StartIndexLocation, iO->BaseVertexLocation, 0);
 
+		
 	}
 }
 
@@ -2403,6 +2600,8 @@ void MainApp::DrawSceneToShadowMap()
     mCommandList->SetPipelineState(mPSOs["shadow_opaque"].Get());
 
     DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	DrawImmerseObjects(mCommandList.Get(), mAllImmerseObjects);
+
 
     // Change back to GENERIC_READ so we can read the texture in a shader.
     mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->Resource(),
@@ -2443,11 +2642,63 @@ void MainApp::DrawNormalsAndDepth()
 	
 
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	DrawImmerseObjects(mCommandList.Get(), mAllImmerseObjects);
 
 	// Change back to GENERIC_READ so we can read the texture in a shader.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(normalMap,
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
 
+}
+
+void MainApp::BuildEditorGUI()
+{
+	PanelGUI* leftPanel = new PanelGUI(-0.9f, 0.9f, 0.4f, 1.0f);
+	SubmeshGeometry panelSubMesh;
+	panelSubMesh.IndexCount = (UINT)leftPanel->meshData.Indices32.size();
+	panelSubMesh.BaseVertexLocation = 0;
+	panelSubMesh.StartIndexLocation = 0;
+
+	std::vector<Vertex> vertices((UINT)leftPanel->meshData.Vertices.size());
+
+	UINT k = 0;
+	for (size_t i = 0; i < (UINT)leftPanel->meshData.Vertices.size(); ++i, ++k)
+	{
+		vertices[k].Pos = leftPanel->meshData.Vertices[i].Position;
+		vertices[k].Normal = leftPanel->meshData.Vertices[i].Normal;
+		vertices[k].TexC = leftPanel->meshData.Vertices[i].TexC;
+		vertices[k].TangentU = leftPanel->meshData.Vertices[i].TangentU;
+	}
+
+	std::vector<std::uint16_t> indices;
+	indices.insert(indices.end(), std::begin(leftPanel->meshData.GetIndices16()), std::end(leftPanel->meshData.GetIndices16()));
+
+	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->Name = "guiGeo";
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
+	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+
+	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+
+	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+
+	geo->VertexByteStride = sizeof(Vertex);
+	geo->VertexBufferByteSize = vbByteSize;
+	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
+	geo->IndexBufferByteSize = ibByteSize;
+
+	geo->DrawArgs["leftPanel"] = panelSubMesh;
+
+	mGUIGeometries.push_back(std::move(geo));
+	
 }
 
 

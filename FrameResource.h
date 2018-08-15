@@ -111,14 +111,24 @@ public:
     // So each frame needs their own allocator.
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CmdListAlloc;
 
+	ID3D12Device* mainDevice;
+	UINT mainPassCount;
+	UINT mainMaxInstanceCount;
+	UINT mainMaterialCount;
+	UINT mainNumRenderItems;
+
+
+
     // We cannot update a cbuffer until the GPU is done processing the commands
     // that reference it.  So each frame needs their own cbuffers.
     std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
 	std::unique_ptr<UploadBuffer<SsaoConstants>> SsaoCB = nullptr;
-	std::unique_ptr<UploadBuffer<ImmerseObject>> ImmerseObjectBuffer = nullptr;
+	std::unique_ptr<UploadBuffer<InstanceData>> ImmerseObjectBuffer = nullptr;
+	std::unique_ptr<UploadBuffer<InstanceData>> EditorGUIBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<MaterialData>> MaterialBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<InstanceData>> InstanceBuffer = nullptr;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> renderItemBuffers;
+	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> immerseObjectBuffers;
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;
