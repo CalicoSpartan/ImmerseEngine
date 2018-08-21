@@ -40,6 +40,12 @@ struct InstanceData
 	uint     InstPad2;
 };
 
+struct GUIdata
+{
+	float4 color;
+
+};
+
 TextureCube gCubeMap : register(t0);
 Texture2D gShadowMap : register(t1);
 Texture2D gPlayerViewMap : register(t2);
@@ -53,6 +59,7 @@ Texture2D gTextureMaps[12] : register(t4);
 // The texture array will occupy registers t0, t1, ..., t3 in space0. 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 StructuredBuffer<InstanceData> gInstanceData : register(t1, space1);
+StructuredBuffer<GUIdata> gGUIdata : register(t2, space1);
 
 
 SamplerState gsamPointWrap        : register(s0);

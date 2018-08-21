@@ -22,8 +22,13 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT maxInsta
 		auto tempInstanceBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, maxInstanceCount, false);
 		renderItemBuffers.push_back(std::move(tempInstanceBuffer));
 	}
+	for (UINT i = 0; i < 2; i++)
+	{
+		auto tempGUIdataBuffer = std::make_unique<UploadBuffer<GUIdata>>(device, 1, false);
+		GUIdataBuffers.push_back(std::move(tempGUIdataBuffer));
+	}
 	
-
+	EditorGUIVB = std::make_unique<UploadBuffer<Vertex>>(device, 15, false);
 }
 
 

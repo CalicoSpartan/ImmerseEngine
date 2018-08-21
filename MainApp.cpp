@@ -131,6 +131,7 @@ private:
     void OnKeyboardInput(const GameTimer& gt);
 	void AnimateMaterials(const GameTimer& gt);
 	void UpdateInstanceData(const GameTimer& gt);
+	void UpdateGUIdata(const GameTimer& gt);
 	int foundSimilarVertex(Vertex temp,std::vector<Vertex> vertices);
 	bool is_near(float v1, float v2);
 		
@@ -142,6 +143,7 @@ private:
 	void UpdateSpectatePassCB(const GameTimer& gt);
 	void UpdateSsaoCB(const GameTimer& gt);
 
+	void CheckGuiInteraction(int x, int y);
 	void LoadTextures();
 	void CreatePlayerView();
     void BuildRootSignature();
@@ -157,12 +159,13 @@ private:
     void BuildFrameResources();
     void BuildMaterials();
     void BuildRenderItems();
-	void DrawEditorGUI(ID3D12GraphicsCommandList* cmdList, std::vector<std::unique_ptr<MeshGeometry>>& guiGeometries);
+	void DrawEditorGUI(ID3D12GraphicsCommandList* cmdList);
     void DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems);
 	void DrawImmerseObjects(ID3D12GraphicsCommandList* cmdList, const std::vector<ImmerseObject*>& iObjects);
     void DrawSceneToShadowMap();
 	void DrawNormalsAndDepth();
 	void BuildEditorGUI();
+	
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE GetCpuSrv(int index)const;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE GetGpuSrv(int index)const;
@@ -182,6 +185,8 @@ private:
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	
 	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+	std::unique_ptr<GUIgeometry> mainGUIgeometry;
+	std::vector<Vertex> CalculateVerts();
 	std::vector<std::unique_ptr<MeshGeometry>> mGUIGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
 	std::unordered_map<std::string, std::unique_ptr<Texture>> mTextures;
@@ -319,26 +324,28 @@ bool MainApp::Initialize()
 	mSpectateCamera.LookAt(XMFLOAT3(mSpectateCamera.GetPosition3f()), XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f));
     mShadowMap = std::make_unique<ShadowMap>(
         md3dDevice.Get(), 2048, 2048);
-	
+	mainGUIgeometry = std::make_unique<GUIgeometry>();
 	mSsao = std::make_unique<Ssao>(
 		md3dDevice.Get(),
 		mCommandList.Get(),
 		mClientWidth, mClientHeight);
 	
 	LoadTextures();
-    BuildRootSignature();
+	BuildRootSignature();
 	BuildSsaoRootSignature();
 	BuildDescriptorHeaps();
 	CreatePlayerView();
-    BuildShadersAndInputLayout();
-    BuildShapeGeometry();
+	BuildShadersAndInputLayout();
+	BuildShapeGeometry();
 	BuildEditorGUI();
-    BuildSkullGeometry();
+	BuildSkullGeometry();
 	BuildBoxModel();
 	BuildMaterials();
-    BuildRenderItems();
-    BuildFrameResources();
-    BuildPSOs();
+	BuildRenderItems();
+	BuildFrameResources();
+	BuildPSOs();
+	//BuildEditorGUI();
+	
 
 	mSsao->SetPSOs(mPSOs["ssao"].Get(), mPSOs["ssaoBlur"].Get());
     // Execute the initialization commands.
@@ -394,11 +401,27 @@ void MainApp::OnResize()
 
 void MainApp::Update(const GameTimer& gt)
 {
-    OnKeyboardInput(gt);
+	// Cycle through the circular frame resource array.
+	mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
+	mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
 
-    // Cycle through the circular frame resource array.
-    mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
-    mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
+
+    OnKeyboardInput(gt);
+	
+
+	auto currGUIVB = mCurrFrameResource->EditorGUIVB.get();
+
+	std::vector<Vertex> verts = CalculateVerts();
+
+	
+	for (UINT i = 0; i < (UINT)verts.size(); i++)
+	{
+	Vertex vert = verts[i];
+	currGUIVB->CopyData(i, vert);
+	}
+
+	mainGUIgeometry->VertexBufferGPU = currGUIVB->Resource();
+
 
     // Has the GPU finished processing the commands of the current frame resource?
     // If not, wait until the GPU has completed commands up to this fence point.
@@ -414,6 +437,7 @@ void MainApp::Update(const GameTimer& gt)
 	AnimateMaterials(gt);
 	
 	UpdateInstanceData(gt);
+	UpdateGUIdata(gt);
 	UpdateMaterialBuffer(gt);
     UpdateShadowTransform(gt);
 	UpdatePlayerPassCB(gt);
@@ -516,7 +540,7 @@ void MainApp::Draw(const GameTimer& gt)
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
 
 	mCommandList->SetPipelineState(mPSOs["EditorGUI"].Get());
-	DrawEditorGUI(mCommandList.Get(), mGUIGeometries);
+	DrawEditorGUI(mCommandList.Get());
 
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -544,8 +568,11 @@ void MainApp::Draw(const GameTimer& gt)
 
 void MainApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
+
     mLastMousePos.x = x;
     mLastMousePos.y = y;
+	CheckGuiInteraction(x, y);
+	
 
     SetCapture(mhMainWnd);
 }
@@ -751,6 +778,22 @@ void MainApp::UpdateInstanceData(const GameTimer & gt)
 
 	
 	
+}
+void MainApp::UpdateGUIdata(const GameTimer & gt)
+{
+	
+	for (auto& g : mainGUIgeometry->subGeos)
+	{
+		int visableGUIcount = 0;
+		auto gui = g->myGUI;
+		auto currGUIdataBuffer = mCurrFrameResource->GUIdataBuffers[gui->bufferIndex].get();
+		
+		GUIdata tempGUIdata;
+		tempGUIdata.color = gui->color;
+		currGUIdataBuffer->CopyData(visableGUIcount++, tempGUIdata);
+	}
+
+
 }
 void MainApp::UpdateMaterialBuffer(const GameTimer& gt)
 {
@@ -969,6 +1012,74 @@ void MainApp::UpdateShadowPassCB(const GameTimer& gt)
     currPassCB->CopyData(1, mShadowPassCB);
 }
 
+void MainApp::CheckGuiInteraction(int x, int y)
+{
+
+	for (UINT i = 0; i < (UINT)mainGUIgeometry->subGeos.size(); i++)
+	{
+		auto gui = mainGUIgeometry->subGeos[i];
+		float guiX = gui->myGUI->x;
+		float guiY = gui->myGUI->y;
+		float guiWidth = gui->myGUI->width;
+		float guiHeight = gui->myGUI->height;
+		float mouseXndc = (2.0f * x) / (mScreenViewport.Width) - 1;
+		float mouseYndc = -(2.0f * y) / (mScreenViewport.Height) + 1;
+		/*
+		std::string pi = "guiX: " + std::to_string(guiX);
+		pi += " guiY: " + std::to_string(guiY);
+		pi += " guiWidth: " + std::to_string(guiWidth);
+		pi += " guiHeight: " + std::to_string(guiHeight);
+		pi += " mouseXndc: " + std::to_string(mouseXndc);
+		pi += " mouseYndc: " + std::to_string(mouseYndc);
+		pi += "  ";
+		std::wstring stemp = std::wstring(pi.begin(), pi.end());
+		LPCWSTR sw = stemp.c_str();
+		OutputDebugString(sw);
+		OutputDebugStringW(L"\n");
+		*/
+
+		if (guiX < mouseXndc && guiY > mouseYndc && guiX + guiWidth > mouseXndc && guiY - guiHeight < mouseYndc)
+		{
+			
+			//gui->myGUI->color = DirectX::XMFLOAT4{ 0.0,0.0,0.0,1.0 };
+			BaseGUI* temp = gui->myGUI;
+			PanelGUI* checkPanel = dynamic_cast<PanelGUI*>(temp);
+			if (checkPanel != nullptr)
+			{
+				if (!checkPanel->bIsClosed)
+				{
+					checkPanel->ChangeSize(true);
+				}
+				else
+				{
+					checkPanel->ChangeSize(false);
+				}
+				
+			}
+			/*
+			std::vector<Vertex> verts = CalculateVerts();
+
+			
+			for (UINT n = 0; n < (UINT)verts.size(); n++)
+			{
+				Vertex nVert = verts[n];
+				mCurrFrameResource->EditorGUIVB.get()->CopyData(n, nVert);
+			}
+
+			mainGUIgeometry->VertexBufferGPU = mCurrFrameResource->EditorGUIVB.get()->Resource();
+			*/
+			std::string pi = " Clicked A Button ";
+
+			std::wstring stemp = std::wstring(pi.begin(), pi.end());
+			LPCWSTR sw = stemp.c_str();
+			OutputDebugString(sw);
+			OutputDebugStringW(L"\n");
+		}
+
+	}
+
+}
+
 void MainApp::LoadTextures()
 {
 	std::vector<std::string> texNames = 
@@ -1127,7 +1238,7 @@ void MainApp::BuildRootSignature()
 	texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 14, 4, 0);
 
     // Root parameter can be a table, root descriptor or root constants.
-    CD3DX12_ROOT_PARAMETER slotRootParameter[5];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[6];
 
 	// Perfomance TIP: Order from most frequent to least frequent.
     slotRootParameter[0].InitAsShaderResourceView(1, 1);
@@ -1135,13 +1246,14 @@ void MainApp::BuildRootSignature()
     slotRootParameter[2].InitAsShaderResourceView(0, 1);
 	slotRootParameter[3].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
 	slotRootParameter[4].InitAsDescriptorTable(1, &texTable1, D3D12_SHADER_VISIBILITY_PIXEL);
+	slotRootParameter[5].InitAsShaderResourceView(2, 1);
 
 
 
 	auto staticSamplers = GetStaticSamplers();
 
     // A root signature is an array of root parameters.
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(5, slotRootParameter,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter,
 		(UINT)staticSamplers.size(), staticSamplers.data(),
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -2208,6 +2320,8 @@ void MainApp::BuildFrameResources()
         mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
             3, 200, (UINT)mMaterials.size(),4));
     }
+
+	
 }
 
 void MainApp::BuildMaterials()
@@ -2514,17 +2628,24 @@ void MainApp::BuildRenderItems()
 
 }
 
-void MainApp::DrawEditorGUI(ID3D12GraphicsCommandList * cmdList, std::vector<std::unique_ptr<MeshGeometry>>& guiGeometries)
+void MainApp::DrawEditorGUI(ID3D12GraphicsCommandList * cmdList)
 {
-	for (size_t i = 0; i < guiGeometries.size(); ++i)
+	for (UINT i = 0; i < (UINT)mainGUIgeometry->subGeos.size(); i++)
 	{
-		auto gui = guiGeometries[i].get();
-		cmdList->IASetVertexBuffers(0, 1, &gui->VertexBufferView());
-		cmdList->IASetIndexBuffer(&gui->IndexBufferView());
+
+		auto gui = mainGUIgeometry->subGeos[i];
+		//auto gui = mainGUIgeometry.get()->subGeos[i];
+		
+		auto GUIdataBuffer = mCurrFrameResource->GUIdataBuffers[gui->myGUI->bufferIndex]->Resource();
+		cmdList->IASetVertexBuffers(0, 1, &mainGUIgeometry->VertexBufferView());
+		cmdList->IASetIndexBuffer(&mainGUIgeometry->IndexBufferView());
 		cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		auto instanceBuffer = mCurrFrameResource->EditorGUIBuffer->Resource();
-		cmdList->SetGraphicsRootShaderResourceView(0, instanceBuffer->GetGPUVirtualAddress());
-		cmdList->DrawIndexedInstanced(6, 1, gui->DrawArgs["leftPanel"].StartIndexLocation, gui->DrawArgs["leftPanel"].BaseVertexLocation, 0);
+		cmdList->SetGraphicsRootShaderResourceView(5, GUIdataBuffer->GetGPUVirtualAddress());
+
+
+		cmdList->DrawIndexedInstanced(gui->IndexCount, 1, gui->StartIndexLocation, gui->BaseVertexLocation, 0);
+		
+		
 	}
 }
 
@@ -2652,13 +2773,33 @@ void MainApp::DrawNormalsAndDepth()
 
 void MainApp::BuildEditorGUI()
 {
-	PanelGUI* leftPanel = new PanelGUI(-0.9f, 0.9f, 0.4f, 1.0f);
-	SubmeshGeometry panelSubMesh;
-	panelSubMesh.IndexCount = (UINT)leftPanel->meshData.Indices32.size();
-	panelSubMesh.BaseVertexLocation = 0;
-	panelSubMesh.StartIndexLocation = 0;
+	PanelGUI* leftPanel = new PanelGUI(-0.9f, .9f, 0.4f, 1.0f);
+	leftPanel->bufferIndex = 0;
+	leftPanel->color = DirectX::XMFLOAT4{ 1.0f,1.0f,0.0f,1.0f };
+	GUIsubGeometry* leftPanelSubGeo = new GUIsubGeometry();
+	leftPanelSubGeo->BaseVertexLocation = 0;
+	leftPanelSubGeo->StartIndexLocation = 0;
+	leftPanelSubGeo->IndexCount = (UINT)leftPanel->meshData.Indices32.size();
+	PanelGUI* tempLeftPanel = leftPanel;
+	leftPanelSubGeo->myGUI = static_cast<BaseGUI*>(tempLeftPanel);
+	
+	PanelGUI* rightPanel = new PanelGUI(0.1f, 0.9f, 0.4f, 1.0f);
+	rightPanel->bufferIndex = 1;
+	rightPanel->color = DirectX::XMFLOAT4{ 0.0f,1.0f,0.0f,1.0f };
+	GUIsubGeometry* rightPanelSubGeo = new GUIsubGeometry();
+	rightPanelSubGeo->BaseVertexLocation = (UINT)leftPanel->meshData.Vertices.size();
+	rightPanelSubGeo->StartIndexLocation = (UINT)leftPanel->meshData.Indices32.size();
+	rightPanelSubGeo->IndexCount = (UINT)rightPanel->meshData.Indices32.size();
+	
+	PanelGUI* tempRightPanel = rightPanel;
+	rightPanelSubGeo->myGUI = static_cast<BaseGUI*>(tempRightPanel);
 
-	std::vector<Vertex> vertices((UINT)leftPanel->meshData.Vertices.size());
+
+	
+
+	UINT vertexCount = (UINT)(leftPanel->meshData.Vertices.size() + rightPanel->meshData.Vertices.size());
+
+	std::vector<Vertex> vertices(vertexCount);
 
 	UINT k = 0;
 	for (size_t i = 0; i < (UINT)leftPanel->meshData.Vertices.size(); ++i, ++k)
@@ -2668,37 +2809,52 @@ void MainApp::BuildEditorGUI()
 		vertices[k].TexC = leftPanel->meshData.Vertices[i].TexC;
 		vertices[k].TangentU = leftPanel->meshData.Vertices[i].TangentU;
 	}
+	for (size_t i = 0; i < (UINT)rightPanel->meshData.Vertices.size(); ++i, ++k)
+	{
+		vertices[k].Pos = rightPanel->meshData.Vertices[i].Position;
+		vertices[k].Normal = rightPanel->meshData.Vertices[i].Normal;
+		vertices[k].TexC = rightPanel->meshData.Vertices[i].TexC;
+		vertices[k].TangentU = rightPanel->meshData.Vertices[i].TangentU;
+	}
 
-	std::vector<std::uint16_t> indices;
+	std::vector<std::uint16_t> indices;// ((UINT)(leftPanel.get()->meshData.GetIndices16().size() + rightPanel.get()->meshData.GetIndices16().size()));
 	indices.insert(indices.end(), std::begin(leftPanel->meshData.GetIndices16()), std::end(leftPanel->meshData.GetIndices16()));
+	indices.insert(indices.end(), std::begin(rightPanel->meshData.GetIndices16()), std::end(rightPanel->meshData.GetIndices16()));
+	UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+	UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
 
-	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
-	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-
-	auto geo = std::make_unique<MeshGeometry>();
-	geo->Name = "guiGeo";
-
-	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
-	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
-
-	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
-	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
-
-	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
-
-	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
-
-	geo->VertexByteStride = sizeof(Vertex);
-	geo->VertexBufferByteSize = vbByteSize;
-	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
-	geo->IndexBufferByteSize = ibByteSize;
-
-	geo->DrawArgs["leftPanel"] = panelSubMesh;
-
-	mGUIGeometries.push_back(std::move(geo));
 	
+	mainGUIgeometry->VertexBufferCPU = nullptr;
+	//ThrowIfFailed(D3DCreateBlob(vbByteSize, &mainGUIgeometry->VertexBufferCPU));
+	//CopyMemory(mainGUIgeometry->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &mainGUIgeometry->IndexBufferCPU));
+	CopyMemory(mainGUIgeometry->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+	mainGUIgeometry->VertexBufferGPU = nullptr;
+	//mainGUIgeometry->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		//mCommandList.Get(), vertices.data(), vbByteSize, mainGUIgeometry->VertexBufferUploader);
+
+	mainGUIgeometry->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, mainGUIgeometry->IndexBufferUploader);
+
+	mainGUIgeometry->VertexByteStride = sizeof(Vertex);
+	mainGUIgeometry->VertexBufferByteSize = vbByteSize;
+	mainGUIgeometry->IndexFormat = DXGI_FORMAT_R16_UINT;;
+	mainGUIgeometry->IndexBufferByteSize = ibByteSize;
+
+	mainGUIgeometry->subGeos.push_back(std::move(leftPanelSubGeo));
+	mainGUIgeometry->subGeos.push_back(std::move(rightPanelSubGeo));
+	/*
+	std::vector<Vertex> verts = CalculateVerts();
+	auto currGUIVB = mCurrFrameResource->EditorGUIVB.get();
+	for (UINT i = 0; i < (UINT)verts.size();i++)
+	{
+		Vertex vert = verts[i];
+		currGUIVB->CopyData(i, vert);
+	}
+
+	mainGUIgeometry->VertexBufferGPU = currGUIVB->Resource();
+	*/
 }
 
 
@@ -2798,5 +2954,28 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> MainApp::GetStaticSamplers()
 		anisotropicWrap, anisotropicClamp,
         shadow 
     };
+}
+
+std::vector<Vertex> MainApp::CalculateVerts()
+{
+	UINT totalVerts = 0;
+	for (auto subGeo : mainGUIgeometry->subGeos)
+	{
+		totalVerts += (UINT)subGeo->myGUI->meshData.Vertices.size();
+	}
+	std::vector<Vertex> vertices(totalVerts);
+	UINT currentVertIndex = 0;
+	for (auto subGeo : mainGUIgeometry->subGeos)
+	{
+		for (UINT i = 0; i < subGeo->myGUI->meshData.Vertices.size(); i++, currentVertIndex++)
+		{
+			vertices[currentVertIndex].Pos = subGeo->myGUI->meshData.Vertices[i].Position;
+			vertices[currentVertIndex].Normal = subGeo->myGUI->meshData.Vertices[i].Normal;
+			vertices[currentVertIndex].TexC = subGeo->myGUI->meshData.Vertices[i].TexC;
+			vertices[currentVertIndex].TangentU = subGeo->myGUI->meshData.Vertices[i].TangentU;
+		}
+	}
+	return vertices;
+	
 }
 

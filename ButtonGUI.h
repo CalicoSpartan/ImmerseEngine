@@ -1,24 +1,22 @@
 #pragma once
-#include "Common/d3dUtil.h"
-#include "Common/MathHelper.h"
-#include "Common/UploadBuffer.h"
+#include "BaseGUI.h"
+
+
+
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-
-class ButtonGUI
+class ButtonGUI : public BaseGUI
 {
 public:
 	ButtonGUI(float width, float height,std::string label = "");
 	~ButtonGUI() = default;
-	void OnClicked();
+	void OnClicked() override;
 	
 
 private:
-	XMFLOAT4 color;
-	float width;
-	float height;
+	
 	std::string label;
 
 };

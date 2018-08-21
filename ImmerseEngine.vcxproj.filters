@@ -113,5 +113,8 @@
     <ClInclude Include="PanelGUI.h">
       <Filter>EditorGUI</Filter>
     </ClInclude>
+    <ClInclude Include="BaseGUI.h">
+      <Filter>EditorGUI</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

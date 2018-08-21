@@ -2,10 +2,7 @@
 
 PanelGUI::PanelGUI(float x, float y, float width, float height)
 {
-	x_pos = x;
-	y_pos = y;
-	this->width = width;
-	this->height = height;
+
 
 	
 
@@ -45,5 +42,35 @@ PanelGUI::PanelGUI(float x, float y, float width, float height)
 	meshData.Indices32[4] = 2;
 	meshData.Indices32[5] = 3;
 
+	this->x = x;
+	this->y = y;
+	this->width = width;
+	this->height = height;
+	collapsedHeight = .1f;
+	originalHeight = height;
+	position.x = x;
+	position.y = y;
+	ChangeSize(bIsClosed);
 	
+}
+
+void PanelGUI::ChangeSize(bool bClose)
+{
+	if (bClose)
+	{
+		height = collapsedHeight;
+		meshData.Vertices[3].Position = XMFLOAT3(x + width, y - height, 0.0f);
+		meshData.Vertices[0].Position = XMFLOAT3(x, y - height, 0.0f);
+		bIsClosed = true;
+		
+		
+	}
+	else
+	{
+		height = originalHeight;
+		meshData.Vertices[3].Position = XMFLOAT3(x + width, y - height, 0.0f);
+		meshData.Vertices[0].Position = XMFLOAT3(x, y - height, 0.0f);
+		bIsClosed = false;
+		
+	}
 }

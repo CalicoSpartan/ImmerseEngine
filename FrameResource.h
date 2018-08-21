@@ -3,6 +3,7 @@
 #include "Common/d3dUtil.h"
 #include "Common/MathHelper.h"
 #include "ImmerseObject.h"
+#include "EditorGUIincludes.h"
 #include "Common/UploadBuffer.h"
 
 struct ObjectConstants
@@ -127,7 +128,9 @@ public:
 	std::unique_ptr<UploadBuffer<InstanceData>> EditorGUIBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<MaterialData>> MaterialBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<InstanceData>> InstanceBuffer = nullptr;
+	std::unique_ptr<UploadBuffer<Vertex>> EditorGUIVB = nullptr;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> renderItemBuffers;
+	std::vector<std::unique_ptr<UploadBuffer<GUIdata>>> GUIdataBuffers;;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> immerseObjectBuffers;
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
