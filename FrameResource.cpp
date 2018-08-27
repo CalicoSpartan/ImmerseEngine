@@ -29,6 +29,7 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT maxInsta
 	}
 	
 	EditorGUIVB = std::make_unique<UploadBuffer<Vertex>>(device, 15, false);
+	fontVB = std::make_unique<UploadBuffer<Vertex>>(device, 100, false);
 }
 
 

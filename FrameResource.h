@@ -17,15 +17,14 @@ struct ObjectConstants
 };
 
 
-/*struct InstanceData
+struct characterQuad
 {
-	DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
-	DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
-	UINT MaterialIndex;
-	UINT InstancePad0;
-	UINT InstancePad1;
-	UINT InstancePad2;
-};*/
+	float x;
+	float y;
+	float width;
+	float height;
+	float color;
+};
 
 struct PassConstants
 {
@@ -129,6 +128,7 @@ public:
 	std::unique_ptr<UploadBuffer<MaterialData>> MaterialBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<InstanceData>> InstanceBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<Vertex>> EditorGUIVB = nullptr;
+	std::unique_ptr<UploadBuffer<Vertex>> fontVB = nullptr;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> renderItemBuffers;
 	std::vector<std::unique_ptr<UploadBuffer<GUIdata>>> GUIdataBuffers;;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> immerseObjectBuffers;

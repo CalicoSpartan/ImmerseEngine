@@ -28,6 +28,7 @@
     <ClCompile Include="Common\GeometryGenerator.cpp" />
     <ClCompile Include="Common\MathHelper.cpp" />
     <ClCompile Include="FrameResource.cpp" />
+    <ClCompile Include="ImmerseFont.cpp" />
     <ClCompile Include="ImmerseObject.cpp" />
     <ClCompile Include="MainApp.cpp" />
     <ClCompile Include="PanelGUI.cpp" />
@@ -48,6 +49,7 @@
     <ClInclude Include="Common\UploadBuffer.h" />
     <ClInclude Include="EditorGUIincludes.h" />
     <ClInclude Include="FrameResource.h" />
+    <ClInclude Include="ImmerseFont.h" />
     <ClInclude Include="ImmerseObject.h" />
     <ClInclude Include="PanelGUI.h" />
     <ClInclude Include="ShadowMap.h" />

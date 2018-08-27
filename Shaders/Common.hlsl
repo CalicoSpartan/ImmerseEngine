@@ -48,12 +48,15 @@ struct GUIdata
 
 TextureCube gCubeMap : register(t0);
 Texture2D gShadowMap : register(t1);
-Texture2D gPlayerViewMap : register(t2);
-Texture2D gSsaoMap   : register(t3);
+Texture2D gSsaoMap   : register(t2);
+//registers t3 - t6 are occupied
+Texture2D gFontMap : register(t7);
+
+
 
 // An array of textures, which is only supported in shader model 5.1+.  Unlike Texture2DArray, the textures
 // in this array can be different sizes and formats, making it more flexible than texture arrays.
-Texture2D gTextureMaps[12] : register(t4);
+Texture2D gTextureMaps[12] : register(t9);
 
 // Put in space1, so the texture array does not overlap with these resources.  
 // The texture array will occupy registers t0, t1, ..., t3 in space0. 

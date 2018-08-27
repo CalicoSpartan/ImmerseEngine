@@ -165,7 +165,8 @@ private:
     void DrawSceneToShadowMap();
 	void DrawNormalsAndDepth();
 	void BuildEditorGUI();
-	
+	void CreateMainFont();
+	void DrawTextGUI(ID3D12GraphicsCommandList* cmdList);
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE GetCpuSrv(int index)const;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE GetGpuSrv(int index)const;
@@ -213,12 +214,14 @@ private:
     UINT mNullCubeSrvIndex = 0;
 	UINT mNullTexSrvIndex1 = 0;
 	UINT mNullTexSrvIndex2 = 0;
+	UINT mFontTexSrvIndex = 0;
 	UINT playerViewSrvIndex = 0;
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE playerViewDSVHandle;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE playerViewSRVHandle;
     CD3DX12_GPU_DESCRIPTOR_HANDLE mNullSrv;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE nullSrv;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE fontTextureSrv;
     PassConstants mMainPassCB;  // index 0 of pass cbuffer.
     PassConstants mShadowPassCB;// index 1 of pass cbuffer.
 	PassConstants mSpectatePassCB;
@@ -227,9 +230,11 @@ private:
 	Camera mSpectateCamera;
 
     std::unique_ptr<ShadowMap> mShadowMap;
-
+	std::unique_ptr<ImmerseFont> mainFont;
+	std::vector<Vertex> fontVertices;
 	std::unique_ptr<Ssao> mSsao;
-	
+	std::unique_ptr<Texture> fontTexture;
+	std::unique_ptr<Texture> testTexture;
 
 	D3D12_VIEWPORT mPlayerViewViewport;
 	D3D12_RECT mPlayerViewScissorRect;
@@ -334,17 +339,18 @@ bool MainApp::Initialize()
 	BuildRootSignature();
 	BuildSsaoRootSignature();
 	BuildDescriptorHeaps();
-	CreatePlayerView();
+	//CreatePlayerView();
 	BuildShadersAndInputLayout();
 	BuildShapeGeometry();
 	BuildEditorGUI();
+	CreateMainFont();
 	BuildSkullGeometry();
 	BuildBoxModel();
 	BuildMaterials();
 	BuildRenderItems();
 	BuildFrameResources();
 	BuildPSOs();
-	//BuildEditorGUI();
+	
 	
 
 	mSsao->SetPSOs(mPSOs["ssao"].Get(), mPSOs["ssaoBlur"].Get());
@@ -541,6 +547,9 @@ void MainApp::Draw(const GameTimer& gt)
 
 	mCommandList->SetPipelineState(mPSOs["EditorGUI"].Get());
 	DrawEditorGUI(mCommandList.Get());
+
+	mCommandList->SetPipelineState(mPSOs["FontShader"].Get());
+	DrawTextGUI(mCommandList.Get());
 
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -792,6 +801,19 @@ void MainApp::UpdateGUIdata(const GameTimer & gt)
 		tempGUIdata.color = gui->color;
 		currGUIdataBuffer->CopyData(visableGUIcount++, tempGUIdata);
 	}
+
+	auto currFontVB = mCurrFrameResource->fontVB.get();
+
+	
+
+
+	for (UINT i = 0; i < (UINT)fontVertices.size(); i++)
+	{
+		Vertex vert = fontVertices[i];
+		currFontVB->CopyData(i, vert);
+	}
+
+	mainFont->VertexBufferGPU = currFontVB->Resource();
 
 
 }
@@ -1123,7 +1145,23 @@ void MainApp::LoadTextures()
 			texMap->Resource, texMap->UploadHeap));
 			
 		mTextures[texMap->Name] = std::move(texMap);
-	}		
+	}
+	fontTexture = std::make_unique<Texture>();
+	fontTexture->Name = "fontTexture";
+	fontTexture->Filename = L"Textures//Font1dds.dds";
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
+		mCommandList.Get(), fontTexture->Filename.c_str(),
+		fontTexture->Resource, fontTexture->UploadHeap));
+	mainFont = std::make_unique<ImmerseFont>("Font1", (int)fontTexture->Resource->GetDesc().Width, (int)fontTexture->Resource->GetDesc().Height);
+
+
+	testTexture = std::make_unique<Texture>();
+	testTexture->Name = "testTexture";
+	testTexture->Filename = L"Textures//checkboard.dds";
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
+		mCommandList.Get(), testTexture->Filename.c_str(),
+		testTexture->Resource, testTexture->UploadHeap));
+
 }
 
 void MainApp::CreatePlayerView()
@@ -1232,13 +1270,13 @@ void MainApp::CreatePlayerView()
 void MainApp::BuildRootSignature()
 {
 	CD3DX12_DESCRIPTOR_RANGE texTable0;
-	texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0);
+	texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 9, 0, 0);
 
 	CD3DX12_DESCRIPTOR_RANGE texTable1;
-	texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 14, 4, 0);
+	texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 14, 9, 0);
 
     // Root parameter can be a table, root descriptor or root constants.
-    CD3DX12_ROOT_PARAMETER slotRootParameter[6];
+    CD3DX12_ROOT_PARAMETER slotRootParameter[7];
 
 	// Perfomance TIP: Order from most frequent to least frequent.
     slotRootParameter[0].InitAsShaderResourceView(1, 1);
@@ -1247,13 +1285,14 @@ void MainApp::BuildRootSignature()
 	slotRootParameter[3].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
 	slotRootParameter[4].InitAsDescriptorTable(1, &texTable1, D3D12_SHADER_VISIBILITY_PIXEL);
 	slotRootParameter[5].InitAsShaderResourceView(2, 1);
+	slotRootParameter[6].InitAsShaderResourceView(3, 1);
 
 
 
 	auto staticSamplers = GetStaticSamplers();
 
     // A root signature is an array of root parameters.
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6, slotRootParameter,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7, slotRootParameter,
 		(UINT)staticSamplers.size(), staticSamplers.data(),
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -1420,6 +1459,7 @@ void MainApp::BuildDescriptorHeaps()
     mNullCubeSrvIndex = mSsaoHeapIndexStart + 5;
 	
     mNullTexSrvIndex1 = mNullCubeSrvIndex + 1;
+	
 
 
 
@@ -1433,18 +1473,25 @@ void MainApp::BuildDescriptorHeaps()
     mNullSrv = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mNullCubeSrvIndex, mCbvSrvUavDescriptorSize);
 	playerViewSRVHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mNullCubeSrvIndex, mCbvSrvUavDescriptorSize);
 	playerViewDSVHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvCpuStart, 2, mDsvDescriptorSize);
+	
 
-    md3dDevice->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
-    nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
+   // md3dDevice->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
+   // nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
 
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     srvDesc.Texture2D.MostDetailedMip = 0;
     srvDesc.Texture2D.MipLevels = 1;
     srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-    md3dDevice->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
-
-
+   // md3dDevice->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
+	//nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
+	srvDesc.Format = fontTexture->Resource->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = fontTexture->Resource->GetDesc().MipLevels;
+	md3dDevice->CreateShaderResourceView(fontTexture->Resource.Get(), &srvDesc, nullSrv);
+	nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
+	srvDesc.Format = testTexture->Resource->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = testTexture->Resource->GetDesc().MipLevels;
+	md3dDevice->CreateShaderResourceView(testTexture->Resource.Get(), &srvDesc, nullSrv);
 	
     
     mShadowMap->BuildDescriptors(
@@ -1745,6 +1792,8 @@ void MainApp::BuildShadersAndInputLayout()
 
 	mShaders["editorVS"] = d3dUtil::CompileShader(L"Shaders\\EditorGUI.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["editorPS"] = d3dUtil::CompileShader(L"Shaders\\EditorGUI.hlsl", nullptr, "PS", "ps_5_1");
+	mShaders["fontVS"] = d3dUtil::CompileShader(L"Shaders\\FontShader.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["fontPS"] = d3dUtil::CompileShader(L"Shaders\\FontShader.hlsl", nullptr, "PS", "ps_5_1");
 
     mInputLayout =
     {
@@ -2286,6 +2335,36 @@ void MainApp::BuildPSOs()
 	};
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&editorPsoDesc, IID_PPV_ARGS(&mPSOs["EditorGUI"])));
 
+
+	D3D12_BLEND_DESC textBlendStateDesc = {};
+	textBlendStateDesc.AlphaToCoverageEnable = FALSE;
+	textBlendStateDesc.IndependentBlendEnable = FALSE;
+	textBlendStateDesc.RenderTarget[0].BlendEnable = TRUE;
+
+	textBlendStateDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	textBlendStateDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+	textBlendStateDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+
+	textBlendStateDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_SRC_ALPHA;
+	textBlendStateDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+	textBlendStateDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+
+	textBlendStateDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC fontPsoDesc = debugPsoDesc;
+	fontPsoDesc.BlendState = textBlendStateDesc;
+	fontPsoDesc.VS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["fontVS"]->GetBufferPointer()),
+		mShaders["fontVS"]->GetBufferSize()
+	};
+	fontPsoDesc.PS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["fontPS"]->GetBufferPointer()),
+		mShaders["fontPS"]->GetBufferSize()
+	};
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&fontPsoDesc, IID_PPV_ARGS(&mPSOs["FontShader"])));
+
+
 	//
 	// PSO for sky.
 	//
@@ -2686,7 +2765,7 @@ void MainApp::DrawImmerseObjects(ID3D12GraphicsCommandList* cmdList, const std::
 		cmdList->SetGraphicsRootShaderResourceView(0, instanceBuffer->GetGPUVirtualAddress());
 
 		cmdList->DrawIndexedInstanced(iO->IndexCount, iO->InstanceCount, iO->StartIndexLocation, iO->BaseVertexLocation, 0);
-
+		
 		
 	}
 }
@@ -2855,6 +2934,98 @@ void MainApp::BuildEditorGUI()
 
 	mainGUIgeometry->VertexBufferGPU = currGUIVB->Resource();
 	*/
+}
+
+void MainApp::CreateMainFont()
+{
+	std::string p = "Penis";
+	XMFLOAT2 position = XMFLOAT2(-.2f, .2f);
+	std::vector<std::uint16_t> indices;
+	int k = 0;
+	for (char c : p)
+	{
+		XMFLOAT4 test = mainFont->MapGlyphQuad(c);
+
+		Vertex vert1;
+		float u = test.x / (float)fontTexture->Resource->GetDesc().Width;
+		float v = test.y  / (float)fontTexture->Resource->GetDesc().Height;
+		float h = test.w / (float)fontTexture->Resource->GetDesc().Height;
+		float w = test.z / (float)fontTexture->Resource->GetDesc().Width;
+		vert1.TexC = XMFLOAT2(u, v);
+		//vert1.TexC = XMFLOAT2(.93f, .7f);
+		vert1.Pos = XMFLOAT3(position.x, position.y,0.0f);
+		std::string output = "(" + std::to_string(u);
+		output += "," + std::to_string(v);
+		output += ") ";
+		std::wstring temp(output.begin(), output.end());
+		OutputDebugStringW(temp.c_str());
+		Vertex vert2;
+		//u = test.x + mainFont->glyphWidth / (float)fontTexture->Resource->GetDesc().Width;
+		//v = test.y / (float)fontTexture->Resource->GetDesc().Height;
+		vert2.TexC = XMFLOAT2(u + w, v);
+		vert2.Pos = XMFLOAT3(position.x + .1f, position.y, 0.0f);
+		//vert2.TexC = XMFLOAT2(.96f, .7f);
+		Vertex vert3;
+		//u = test.x / (float)fontTexture->Resource->GetDesc().Width;
+		//v = test.y  + mainFont->glyphHeight / (float)fontTexture->Resource->GetDesc().Height;
+		vert3.TexC = XMFLOAT2(u, v + h);
+		vert3.Pos = XMFLOAT3(position.x, position.y - .1f, 0.0f);
+		//vert3.TexC = XMFLOAT2(.93f, .96f);
+		Vertex vert4;
+		//u = test.x + mainFont->glyphWidth / (float)fontTexture->Resource->GetDesc().Width;
+		//v = test.y  + mainFont->glyphHeight / (float)fontTexture->Resource->GetDesc().Height;
+		vert4.TexC = XMFLOAT2(u + w, v + h);
+		vert4.Pos = XMFLOAT3(position.x + .1f, position.y - .1f, 0.0f);
+		//vert4.TexC = XMFLOAT2(.96f, .96f);
+		fontVertices.push_back(vert1);
+		fontVertices.push_back(vert2);
+		fontVertices.push_back(vert3);
+		fontVertices.push_back(vert4);
+
+		position.x += .1f;
+		indices.push_back(k + 0);
+		indices.push_back(k + 1);
+		indices.push_back(k + 2);
+		indices.push_back(k + 1);
+		indices.push_back(k + 3);
+		indices.push_back(k + 2);
+		k += 4;
+	}
+
+	mainFont->textLength = (UINT)indices.size();
+	UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+	UINT vbByteSize = (UINT)fontVertices.size() * sizeof(Vertex);
+	mainFont->VertexBufferCPU = nullptr;
+	//ThrowIfFailed(D3DCreateBlob(vbByteSize, &mainFont->VertexBufferCPU));
+	//CopyMemory(mainFont->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &mainFont->IndexBufferCPU));
+	CopyMemory(mainFont->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+	mainFont->VertexBufferGPU = nullptr;
+	//mainFont->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	//mCommandList.Get(), vertices.data(), vbByteSize, mainFont->VertexBufferUploader);
+
+	mainFont->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+		mCommandList.Get(), indices.data(), ibByteSize, mainFont->IndexBufferUploader);
+
+	mainFont->VertexByteStride = sizeof(Vertex);
+	mainFont->VertexBufferByteSize = vbByteSize;
+	mainFont->IndexFormat = DXGI_FORMAT_R16_UINT;;
+	mainFont->IndexBufferByteSize = ibByteSize;
+}
+
+void MainApp::DrawTextGUI(ID3D12GraphicsCommandList * cmdList)
+{
+	
+	cmdList->IASetVertexBuffers(0, 1, &mainFont->VertexBufferView());
+	cmdList->IASetIndexBuffer(&mainFont->IndexBufferView());
+	cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);	
+	cmdList->DrawIndexedInstanced(mainFont->textLength, 1, 0, 0, 0);
+	//cmdList->DrawInstanced(4, 1, 0, 0);
+		
+
+
+	
 }
 
 

@@ -1,31 +1,29 @@
 #pragma once
+#include "Common/d3dUtil.h"
+#include "Common/MathHelper.h"
 
-
-#include "BaseGUI.h"
-#include "ImmerseFont.h"
-#include "PanelGUI.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
 
-struct GUIdata
+class ImmerseFont
 {
-	DirectX::XMFLOAT4 color;
-};
-
-struct GUIsubGeometry
-{
-	//std::unique_ptr<BaseGUI> myGUI;
-	//std::shared_ptr<BaseGUI> myGUI;
-	BaseGUI* myGUI = nullptr;
-	UINT IndexCount = 6;
-	UINT StartIndexLocation = 0;
-	INT BaseVertexLocation = 0;
-};
-
-struct GUIgeometry
-{
+public:
+	ImmerseFont(std::string fontName,int fontWidth,int fontHeight);
+	std::string fontName;
+	int fontWidth;
+	int fontHeight;
+	int numColumns = 32;
+	int numRows = 3;
+	char firstChar = ' ';
+	char lastChar = '~';
+	int glyphWidth;
+	int glyphHeight;
+	UINT textLength = 0;
+	
+	XMFLOAT4 MapGlyphQuad(char c);
+	
 	Microsoft::WRL::ComPtr<ID3DBlob> VertexBufferCPU = nullptr;
 	Microsoft::WRL::ComPtr<ID3DBlob> IndexBufferCPU = nullptr;
 
@@ -41,7 +39,7 @@ struct GUIgeometry
 	DXGI_FORMAT IndexFormat = DXGI_FORMAT_R16_UINT;
 	UINT IndexBufferByteSize = 0;
 
-	std::vector<GUIsubGeometry*> subGeos;
+	
 
 	D3D12_VERTEX_BUFFER_VIEW VertexBufferView()const
 	{
@@ -69,5 +67,6 @@ struct GUIgeometry
 		VertexBufferUploader = nullptr;
 		IndexBufferUploader = nullptr;
 	}
+
 };
 
