@@ -30,6 +30,7 @@
     <ClCompile Include="FrameResource.cpp" />
     <ClCompile Include="ImmerseFont.cpp" />
     <ClCompile Include="ImmerseObject.cpp" />
+    <ClCompile Include="ImmerseText.cpp" />
     <ClCompile Include="MainApp.cpp" />
     <ClCompile Include="PanelGUI.cpp" />
     <ClCompile Include="ShadowMap.cpp" />
@@ -51,6 +52,7 @@
     <ClInclude Include="FrameResource.h" />
     <ClInclude Include="ImmerseFont.h" />
     <ClInclude Include="ImmerseObject.h" />
+    <ClInclude Include="ImmerseText.h" />
     <ClInclude Include="PanelGUI.h" />
     <ClInclude Include="ShadowMap.h" />
     <ClInclude Include="Ssao.h" />

@@ -3,6 +3,7 @@
 
 #include "BaseGUI.h"
 #include "ImmerseFont.h"
+#include "ImmerseText.h"
 #include "PanelGUI.h"
 
 using Microsoft::WRL::ComPtr;

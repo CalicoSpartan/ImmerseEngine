@@ -166,6 +166,7 @@ private:
 	void DrawNormalsAndDepth();
 	void BuildEditorGUI();
 	void CreateMainFont();
+	void CreateText(std::string& text,XMFLOAT2 position,float fontSize,XMFLOAT4 color = XMFLOAT4(1.0f,1.0f,1.0f,1.0f));
 	void DrawTextGUI(ID3D12GraphicsCommandList* cmdList);
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE GetCpuSrv(int index)const;
@@ -197,6 +198,9 @@ private:
     std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
 	FbxManager* g_pFbxSdkManager = nullptr;
  
+	std::vector<ImmerseText*> mImmerseTextObjects;
+	UINT textBufferLastIndiceIndex = 0;
+	UINT textBufferLastVertexIndex = 0;
 	
 	// List of all the render items.
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
@@ -539,18 +543,19 @@ void MainApp::Draw(const GameTimer& gt)
 	
 	DrawImmerseObjects(mCommandList.Get(), mAllImmerseObjects);
 
-    mCommandList->SetPipelineState(mPSOs["debug"].Get());
-	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Debug]);
+   // mCommandList->SetPipelineState(mPSOs["debug"].Get());
+	//DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Debug]);
 
 	mCommandList->SetPipelineState(mPSOs["sky"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
 
 	mCommandList->SetPipelineState(mPSOs["EditorGUI"].Get());
 	DrawEditorGUI(mCommandList.Get());
-
-	mCommandList->SetPipelineState(mPSOs["FontShader"].Get());
-	DrawTextGUI(mCommandList.Get());
-
+	if (!fontVertices.empty())
+	{
+		mCommandList->SetPipelineState(mPSOs["FontShader"].Get());
+		DrawTextGUI(mCommandList.Get());
+	}
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
@@ -805,14 +810,60 @@ void MainApp::UpdateGUIdata(const GameTimer & gt)
 	auto currFontVB = mCurrFrameResource->fontVB.get();
 
 	
+	for (auto immerseText : mImmerseTextObjects)
+	{
 
 
+		if (immerseText->bVisible)
+		{
+			immerseText->instanceCount = 1;
+		}
+		else
+		{
+			immerseText->instanceCount = 0;
+			/*
+			std::string output = " INVIS ";
+
+			
+			std::wstring temp(output.begin(), output.end());
+			OutputDebugStringW(temp.c_str());
+			*/
+		}
+		for (UINT i = 0; i < (UINT)immerseText->myVerticesPos.size(); i++)
+		{
+			
+			Vertex vert;
+
+			vert.Pos = immerseText->myVerticesPos[i];
+
+			vert.TexC = immerseText->myVerticesTex[i];
+			/*
+			std::string output = "working: " + std::to_string(vert.Pos.x);
+			output += " ";
+
+			std::wstring temp(output.begin(), output.end());
+			OutputDebugStringW(temp.c_str());
+			*/
+			//vertsToRender.push_back(vert);
+			
+			currFontVB->CopyData(i, vert);
+			
+		}
+	}
+	/*
+	for (UINT i = 0; i < (UINT)vertsToRender.size(); i++)
+	{
+		Vertex vert = vertsToRender[i];
+		currFontVB->CopyData(i, vert);
+	}
+	*/
+	/*
 	for (UINT i = 0; i < (UINT)fontVertices.size(); i++)
 	{
 		Vertex vert = fontVertices[i];
 		currFontVB->CopyData(i, vert);
 	}
-
+	*/
 	mainFont->VertexBufferGPU = currFontVB->Resource();
 
 
@@ -1071,10 +1122,30 @@ void MainApp::CheckGuiInteraction(int x, int y)
 				if (!checkPanel->bIsClosed)
 				{
 					checkPanel->ChangeSize(true);
+					if (checkPanel->myTitle != nullptr)
+					{
+						checkPanel->myTitle->bVisible = false;
+					}
 				}
 				else
 				{
 					checkPanel->ChangeSize(false);
+					if (checkPanel->myTitle != nullptr)
+					{
+						checkPanel->myTitle->bVisible = true;
+					}
+					else
+					{
+
+						
+						std::string output = " NULL ";
+						
+
+						std::wstring temp(output.begin(), output.end());
+						OutputDebugStringW(temp.c_str());
+						
+
+					}
 				}
 				
 			}
@@ -2342,7 +2413,7 @@ void MainApp::BuildPSOs()
 	textBlendStateDesc.RenderTarget[0].BlendEnable = TRUE;
 
 	textBlendStateDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-	textBlendStateDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+	textBlendStateDesc.RenderTarget[0].DestBlend = D3D12_BLEND_SRC_COLOR;// D3D12_BLEND_ONE;
 	textBlendStateDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
 
 	textBlendStateDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_SRC_ALPHA;
@@ -2352,6 +2423,9 @@ void MainApp::BuildPSOs()
 	textBlendStateDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC fontPsoDesc = debugPsoDesc;
 	fontPsoDesc.BlendState = textBlendStateDesc;
+	D3D12_DEPTH_STENCIL_DESC textDepthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	textDepthStencilDesc.DepthEnable = false;
+	fontPsoDesc.DepthStencilState = textDepthStencilDesc;
 	fontPsoDesc.VS =
 	{
 		reinterpret_cast<BYTE*>(mShaders["fontVS"]->GetBufferPointer()),
@@ -2938,10 +3012,15 @@ void MainApp::BuildEditorGUI()
 
 void MainApp::CreateMainFont()
 {
-	std::string p = "Penis";
-	XMFLOAT2 position = XMFLOAT2(-.2f, .2f);
+	
+	//std::string p = "Penis";
+	//XMFLOAT2 position = XMFLOAT2(-.2f, .2f);
 	std::vector<std::uint16_t> indices;
-	int k = 0;
+	/*
+	float fontSize = 5;
+	float xWidth = fontSize / 142.857142857f;
+	float yHeight = fontSize / 100.0f;
+	
 	for (char c : p)
 	{
 		XMFLOAT4 test = mainFont->MapGlyphQuad(c);
@@ -2952,58 +3031,57 @@ void MainApp::CreateMainFont()
 		float h = test.w / (float)fontTexture->Resource->GetDesc().Height;
 		float w = test.z / (float)fontTexture->Resource->GetDesc().Width;
 		vert1.TexC = XMFLOAT2(u, v);
-		//vert1.TexC = XMFLOAT2(.93f, .7f);
+
 		vert1.Pos = XMFLOAT3(position.x, position.y,0.0f);
+		/*
 		std::string output = "(" + std::to_string(u);
 		output += "," + std::to_string(v);
 		output += ") ";
+		
 		std::wstring temp(output.begin(), output.end());
 		OutputDebugStringW(temp.c_str());
+		*/
+	/*
 		Vertex vert2;
-		//u = test.x + mainFont->glyphWidth / (float)fontTexture->Resource->GetDesc().Width;
-		//v = test.y / (float)fontTexture->Resource->GetDesc().Height;
 		vert2.TexC = XMFLOAT2(u + w, v);
-		vert2.Pos = XMFLOAT3(position.x + .1f, position.y, 0.0f);
-		//vert2.TexC = XMFLOAT2(.96f, .7f);
+		vert2.Pos = XMFLOAT3(position.x + xWidth, position.y, 0.0f);
 		Vertex vert3;
-		//u = test.x / (float)fontTexture->Resource->GetDesc().Width;
-		//v = test.y  + mainFont->glyphHeight / (float)fontTexture->Resource->GetDesc().Height;
 		vert3.TexC = XMFLOAT2(u, v + h);
-		vert3.Pos = XMFLOAT3(position.x, position.y - .1f, 0.0f);
-		//vert3.TexC = XMFLOAT2(.93f, .96f);
+		vert3.Pos = XMFLOAT3(position.x, position.y - yHeight, 0.0f);
 		Vertex vert4;
-		//u = test.x + mainFont->glyphWidth / (float)fontTexture->Resource->GetDesc().Width;
-		//v = test.y  + mainFont->glyphHeight / (float)fontTexture->Resource->GetDesc().Height;
 		vert4.TexC = XMFLOAT2(u + w, v + h);
-		vert4.Pos = XMFLOAT3(position.x + .1f, position.y - .1f, 0.0f);
-		//vert4.TexC = XMFLOAT2(.96f, .96f);
+		vert4.Pos = XMFLOAT3(position.x + xWidth, position.y - yHeight, 0.0f);
+
 		fontVertices.push_back(vert1);
 		fontVertices.push_back(vert2);
 		fontVertices.push_back(vert3);
 		fontVertices.push_back(vert4);
 
-		position.x += .1f;
-		indices.push_back(k + 0);
-		indices.push_back(k + 1);
-		indices.push_back(k + 2);
-		indices.push_back(k + 1);
-		indices.push_back(k + 3);
-		indices.push_back(k + 2);
-		k += 4;
-	}
+		position.x += xWidth;
 
-	mainFont->textLength = (UINT)indices.size();
+	}
+	*/
+	for (int i = 0; i < 800; i++)
+	{
+		indices.push_back(mainFont->currentStartingIndex + 0);
+		indices.push_back(mainFont->currentStartingIndex + 1);
+		indices.push_back(mainFont->currentStartingIndex + 2);
+		indices.push_back(mainFont->currentStartingIndex + 1);
+		indices.push_back(mainFont->currentStartingIndex + 3);
+		indices.push_back(mainFont->currentStartingIndex + 2);
+		mainFont->currentStartingIndex += 4;
+	}
+	//mainFont->numCharCreated += (UINT)p.length();
+	//mainFont->textLength = mainFont->numCharCreated * 6;
 	UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
 	UINT vbByteSize = (UINT)fontVertices.size() * sizeof(Vertex);
 	mainFont->VertexBufferCPU = nullptr;
-	//ThrowIfFailed(D3DCreateBlob(vbByteSize, &mainFont->VertexBufferCPU));
-	//CopyMemory(mainFont->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
+
 
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &mainFont->IndexBufferCPU));
 	CopyMemory(mainFont->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 	mainFont->VertexBufferGPU = nullptr;
-	//mainFont->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-	//mCommandList.Get(), vertices.data(), vbByteSize, mainFont->VertexBufferUploader);
+
 
 	mainFont->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
 		mCommandList.Get(), indices.data(), ibByteSize, mainFont->IndexBufferUploader);
@@ -3012,15 +3090,105 @@ void MainApp::CreateMainFont()
 	mainFont->VertexBufferByteSize = vbByteSize;
 	mainFont->IndexFormat = DXGI_FORMAT_R16_UINT;;
 	mainFont->IndexBufferByteSize = ibByteSize;
+	CreateText(std::string("hello"), XMFLOAT2(0.f, 0.f), 7.0f);
 }
+
+void MainApp::CreateText(std::string & text, XMFLOAT2 position, float fontSize, XMFLOAT4 color)
+{
+	float xWidth = fontSize / 142.857142857f;
+	float yHeight = fontSize / 100.0f;
+	auto parentGui = mainGUIgeometry->subGeos[0]->myGUI;
+	ImmerseText* immerseText = new ImmerseText(text, 0, parentGui);
+	
+	XMFLOAT2 textPosition = XMFLOAT2(parentGui->x + position.x,parentGui->y + position.y); //position is offset from gui position
+	for (int i = 0; i < text.length();i++)
+	{
+		char c = text.at(i);
+		XMFLOAT4 test = mainFont->MapGlyphQuad(c);
+
+		Vertex vert1;
+		float u = test.x / (float)fontTexture->Resource->GetDesc().Width;
+		float v = test.y / (float)fontTexture->Resource->GetDesc().Height;
+		float h = test.w / (float)fontTexture->Resource->GetDesc().Height;
+		float w = test.z / (float)fontTexture->Resource->GetDesc().Width;
+		vert1.TexC = XMFLOAT2(u, v);
+
+		vert1.Pos = XMFLOAT3(textPosition.x, textPosition.y, 0.0f);
+		/*
+		std::string output = "(" + std::to_string(u);
+		output += "," + std::to_string(v);
+		output += ") ";
+
+		std::wstring temp(output.begin(), output.end());
+		OutputDebugStringW(temp.c_str());
+		*/
+	
+		Vertex vert2;
+		vert2.TexC = XMFLOAT2(u + w, v);
+		vert2.Pos = XMFLOAT3(textPosition.x + xWidth, textPosition.y, 0.0f);
+		Vertex vert3;
+		vert3.TexC = XMFLOAT2(u, v + h);
+		vert3.Pos = XMFLOAT3(textPosition.x, textPosition.y - yHeight, 0.0f);
+		Vertex vert4;
+		vert4.TexC = XMFLOAT2(u + w, v + h);
+		vert4.Pos = XMFLOAT3(textPosition.x + xWidth, textPosition.y - yHeight, 0.0f);
+		
+		immerseText->PushBackVertsPos(vert1.Pos);
+		immerseText->PushBackVertsTex(vert1.TexC);
+		immerseText->PushBackVertsPos(vert2.Pos);
+		immerseText->PushBackVertsTex(vert2.TexC);
+		immerseText->PushBackVertsPos(vert3.Pos);
+		immerseText->PushBackVertsTex(vert3.TexC);
+		immerseText->PushBackVertsPos(vert4.Pos);
+		immerseText->PushBackVertsTex(vert4.TexC);
+		/*
+		immerseText->myVerticesPos.push_back(vert1.Pos);
+		immerseText->myVerticesTex.push_back(vert1.TexC);
+		immerseText->myVerticesPos.push_back(vert2.Pos);
+		immerseText->myVerticesTex.push_back(vert2.TexC);
+		immerseText->myVerticesPos.push_back(vert3.Pos);
+		immerseText->myVerticesTex.push_back(vert3.TexC);
+		immerseText->myVerticesPos.push_back(vert4.Pos);
+		immerseText->myVerticesTex.push_back(vert4.TexC);
+		*/
+
+		fontVertices.push_back(vert1);
+		fontVertices.push_back(vert2);
+		fontVertices.push_back(vert3);
+		fontVertices.push_back(vert4);
+
+		textPosition.x += xWidth;
+
+	}
+	
+	
+	immerseText->vertexBufferIndex = textBufferLastVertexIndex;
+	textBufferLastVertexIndex += (UINT)immerseText->myVerticesPos.size();
+	immerseText->indexBufferIndex = textBufferLastIndiceIndex;
+	immerseText->indexCount = (UINT)text.length() * 6;
+	textBufferLastIndiceIndex += (UINT)text.length() * 6;
+	UINT vbByteSize = (UINT)fontVertices.size() * sizeof(Vertex);
+	mainFont->VertexBufferByteSize = vbByteSize;
+	mainFont->numCharCreated += (UINT)text.length();
+	mainFont->textLength = mainFont->numCharCreated * 6;
+	parentGui->myTitle = immerseText;
+	mImmerseTextObjects.push_back(std::move(immerseText));
+	
+}
+
+
 
 void MainApp::DrawTextGUI(ID3D12GraphicsCommandList * cmdList)
 {
 	
-	cmdList->IASetVertexBuffers(0, 1, &mainFont->VertexBufferView());
-	cmdList->IASetIndexBuffer(&mainFont->IndexBufferView());
-	cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);	
-	cmdList->DrawIndexedInstanced(mainFont->textLength, 1, 0, 0, 0);
+
+	for (auto immerseText : mImmerseTextObjects)
+	{
+		cmdList->IASetVertexBuffers(0, 1, &mainFont->VertexBufferView());
+		cmdList->IASetIndexBuffer(&mainFont->IndexBufferView());
+		cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		cmdList->DrawIndexedInstanced(immerseText->indexCount, immerseText->instanceCount, immerseText->indexBufferIndex, (int)immerseText->vertexBufferIndex, 0);
+	}
 	//cmdList->DrawInstanced(4, 1, 0, 0);
 		
 

@@ -8,6 +8,8 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
+
+class ImmerseText; //forward declaration
 class BaseGUI
 {
 public:
@@ -21,5 +23,6 @@ public:
 	XMFLOAT2 position;
 	DirectX::XMFLOAT4 color = { 0.0f,0.0f,0.0f,1.0f };
 	GeometryGenerator::MeshData meshData;
+	ImmerseText* myTitle = nullptr;
 
 };

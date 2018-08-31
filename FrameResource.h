@@ -132,6 +132,7 @@ public:
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> renderItemBuffers;
 	std::vector<std::unique_ptr<UploadBuffer<GUIdata>>> GUIdataBuffers;;
 	std::vector<std::unique_ptr<UploadBuffer<InstanceData>>> immerseObjectBuffers;
+
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;

@@ -32,6 +32,11 @@ VertexOut VS(VertexIn vin)
 float4 PS(VertexOut pin) : SV_Target
 {
 	float4 defaultColor = float4(gFontMap.Sample(gsamLinearWrap, pin.TexC).rgb,1.0f);
+	if (defaultColor.r < 10)
+	{
+		defaultColor.a = 0.0f;
+	}
+	
 	return defaultColor;
 }
 

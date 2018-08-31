@@ -21,7 +21,9 @@ public:
 	int glyphWidth;
 	int glyphHeight;
 	UINT textLength = 0;
-	
+	UINT currentStartingIndex = 0;
+	UINT currentOpenIndex = 0;
+	UINT numCharCreated = 0;
 	XMFLOAT4 MapGlyphQuad(char c);
 	
 	Microsoft::WRL::ComPtr<ID3DBlob> VertexBufferCPU = nullptr;

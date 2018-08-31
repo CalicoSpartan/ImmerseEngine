@@ -66,6 +66,9 @@
     <ClCompile Include="ImmerseFont.cpp">
       <Filter>EditorGUI</Filter>
     </ClCompile>
+    <ClCompile Include="ImmerseText.cpp">
+      <Filter>EditorGUI</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common\Camera.h">
@@ -120,6 +123,9 @@
       <Filter>EditorGUI</Filter>
     </ClInclude>
     <ClInclude Include="ImmerseFont.h">
+      <Filter>EditorGUI</Filter>
+    </ClInclude>
+    <ClInclude Include="ImmerseText.h">
       <Filter>EditorGUI</Filter>
     </ClInclude>
   </ItemGroup>
