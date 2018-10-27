@@ -27,12 +27,14 @@
     <ClCompile Include="Common\GameTimer.cpp" />
     <ClCompile Include="Common\GeometryGenerator.cpp" />
     <ClCompile Include="Common\MathHelper.cpp" />
+    <ClCompile Include="Editor.cpp" />
     <ClCompile Include="FrameResource.cpp" />
     <ClCompile Include="ImmerseFont.cpp" />
     <ClCompile Include="ImmerseObject.cpp" />
     <ClCompile Include="ImmerseText.cpp" />
     <ClCompile Include="MainApp.cpp" />
     <ClCompile Include="PanelGUI.cpp" />
+    <ClCompile Include="ScrollBoxGUI.cpp" />
     <ClCompile Include="ShadowMap.cpp" />
     <ClCompile Include="Ssao.cpp" />
   </ItemGroup>
@@ -48,12 +50,14 @@
     <ClInclude Include="Common\GeometryGenerator.h" />
     <ClInclude Include="Common\MathHelper.h" />
     <ClInclude Include="Common\UploadBuffer.h" />
+    <ClInclude Include="Editor.h" />
     <ClInclude Include="EditorGUIincludes.h" />
     <ClInclude Include="FrameResource.h" />
     <ClInclude Include="ImmerseFont.h" />
     <ClInclude Include="ImmerseObject.h" />
     <ClInclude Include="ImmerseText.h" />
     <ClInclude Include="PanelGUI.h" />
+    <ClInclude Include="ScrollBoxGUI.h" />
     <ClInclude Include="ShadowMap.h" />
     <ClInclude Include="Ssao.h" />
   </ItemGroup>

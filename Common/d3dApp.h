@@ -42,6 +42,8 @@ public:
     virtual bool Initialize();
     virtual LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+	virtual void OnEditorInteraction(std::string info);
+
 protected:
     virtual void CreateRtvAndDsvDescriptorHeaps();
 	virtual void OnResize(); 
@@ -52,6 +54,9 @@ protected:
 	virtual void OnMouseDown(WPARAM btnState, int x, int y){ }
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)  { }
 	virtual void OnMouseMove(WPARAM btnState, int x, int y){ }
+	virtual void OnKeyDown(WPARAM btnState) { }
+	virtual void OnMouseWheelScroll(WPARAM btnState) { }
+
 
 protected:
 

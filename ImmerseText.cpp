@@ -1,10 +1,11 @@
 #include "ImmerseText.h"
 
-ImmerseText::ImmerseText(std::string & text, UINT vertexBufferIndex, BaseGUI * ParentGUI)
+ImmerseText::ImmerseText(std::string & text, UINT vertexBufferIndex, UINT indexBufferIndex, BaseGUI * ParentGUI)
 {
 	myText = text;
 	this->ParentGUI = ParentGUI;
 	this->vertexBufferIndex = vertexBufferIndex;
+	this->indexBufferIndex = indexBufferIndex;
 }
 
 void ImmerseText::PushBackVertsPos(XMFLOAT3 vert)

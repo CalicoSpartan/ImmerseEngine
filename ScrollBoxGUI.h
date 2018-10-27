@@ -7,17 +7,18 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-class ButtonGUI : public BaseGUI
+class ScrollBoxGUI : public BaseGUI
 {
 public:
-	ButtonGUI(float x, float y, float width, float height);
-	~ButtonGUI() = default;
+	ScrollBoxGUI(float x, float y, float width, float height);
+	~ScrollBoxGUI() = default;
 	void OnClicked() override;
 	void OnInvisible(bool bVisible) override;
-
-
+	int scrollValue = 0;
+	std::string stringValue = "";
+	void ChangeScrollValue(int change);
 private:
-	
 
+	
 
 };

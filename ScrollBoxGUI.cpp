@@ -1,12 +1,9 @@
-#include "ButtonGUI.h"
+#include "ScrollBoxGUI.h"
 #include "ImmerseText.h"
 
-ButtonGUI::ButtonGUI(float x, float y, float width, float height)
+ScrollBoxGUI::ScrollBoxGUI(float x, float y, float width, float height)
 {
-	this->width = width;
-	this->height = height;
-	this->x = x;
-	this->y = y;
+
 
 	meshData.Vertices.resize(4);
 	meshData.Indices32.resize(6);
@@ -43,15 +40,24 @@ ButtonGUI::ButtonGUI(float x, float y, float width, float height)
 	meshData.Indices32[3] = 0;
 	meshData.Indices32[4] = 2;
 	meshData.Indices32[5] = 3;
+
+	this->x = x;
+	this->y = y;
+	this->width = width;
+	this->height = height;
 	instanceCount = 1;
+	position.x = x;
+	position.y = y;
+
+
 }
 
-void ButtonGUI::OnClicked()
+void ScrollBoxGUI::OnClicked()
 {
 
 }
 
-void ButtonGUI::OnInvisible(bool bVisible)
+void ScrollBoxGUI::OnInvisible(bool bVisible)
 {
 	bIsVisible = bVisible;
 
@@ -60,3 +66,12 @@ void ButtonGUI::OnInvisible(bool bVisible)
 		myTitle->bIsVisible = bVisible;
 	}
 }
+
+void ScrollBoxGUI::ChangeScrollValue(int change)
+{
+	scrollValue += change;
+	stringValue = std::to_string(scrollValue);
+
+}
+
+

@@ -108,6 +108,12 @@ enum class RenderLayer : int
 	
 };
 
+enum class engineState : int
+{
+	Editor = 0,
+	Play = 1
+};
+
 class MainApp : public D3DApp
 {
 public:
@@ -127,11 +133,15 @@ private:
     virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
     virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
     virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
+	virtual void OnKeyDown(WPARAM btnState)override;
+	virtual void OnMouseWheelScroll(WPARAM btnState)override;
+	virtual void OnEditorInteraction(std::string info)override;
+	void SelectWorldObject(int sx, int sy);
+	DirectX::BoundingBox CalculateSubmeshBounds(GeometryGenerator::MeshData meshData);
 
     void OnKeyboardInput(const GameTimer& gt);
 	void AnimateMaterials(const GameTimer& gt);
 	void UpdateInstanceData(const GameTimer& gt);
-	void UpdateGUIdata(const GameTimer& gt);
 	int foundSimilarVertex(Vertex temp,std::vector<Vertex> vertices);
 	bool is_near(float v1, float v2);
 		
@@ -143,7 +153,7 @@ private:
 	void UpdateSpectatePassCB(const GameTimer& gt);
 	void UpdateSsaoCB(const GameTimer& gt);
 
-	void CheckGuiInteraction(int x, int y);
+	void SpawnObject();
 	void LoadTextures();
 	void CreatePlayerView();
     void BuildRootSignature();
@@ -211,6 +221,8 @@ private:
 	// Render items divided by PSO.
 	std::vector<RenderItem*> mRitemLayer[(int)RenderLayer::Count];
 
+	engineState mCurrentEngineState = engineState::Editor;
+
 	UINT mSkyTexHeapIndex = 0;
     UINT mShadowMapHeapIndex = 0;
 	UINT mSsaoHeapIndexStart = 0;
@@ -237,8 +249,10 @@ private:
 	std::unique_ptr<ImmerseFont> mainFont;
 	std::vector<Vertex> fontVertices;
 	std::unique_ptr<Ssao> mSsao;
-	std::unique_ptr<Texture> fontTexture;
+	//std::unique_ptr<Texture> fontTexture;
 	std::unique_ptr<Texture> testTexture;
+
+	std::unique_ptr<Editor> engineEditor;
 
 	D3D12_VIEWPORT mPlayerViewViewport;
 	D3D12_RECT mPlayerViewScissorRect;
@@ -327,7 +341,7 @@ bool MainApp::Initialize()
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
-
+	engineEditor = std::make_unique<Editor>(md3dDevice.Get(), mCommandList.Get(),this);
 	mCamera.SetPosition(0.0f, 2.0f, -15.0f);
 	mSpectateCamera.SetPosition(30.0f, 30.0f, 20.0f);
 	mSpectateCamera.LookAt(XMFLOAT3(mSpectateCamera.GetPosition3f()), XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f));
@@ -338,7 +352,9 @@ bool MainApp::Initialize()
 		md3dDevice.Get(),
 		mCommandList.Get(),
 		mClientWidth, mClientHeight);
-	
+	engineEditor->mScreenViewport = &mScreenViewport;
+
+
 	LoadTextures();
 	BuildRootSignature();
 	BuildSsaoRootSignature();
@@ -346,15 +362,15 @@ bool MainApp::Initialize()
 	//CreatePlayerView();
 	BuildShadersAndInputLayout();
 	BuildShapeGeometry();
-	BuildEditorGUI();
-	CreateMainFont();
+	//BuildEditorGUI();
+	//CreateMainFont();
 	BuildSkullGeometry();
 	BuildBoxModel();
 	BuildMaterials();
 	BuildRenderItems();
 	BuildFrameResources();
 	BuildPSOs();
-	
+	engineEditor->Initialize();
 	
 
 	mSsao->SetPSOs(mPSOs["ssao"].Get(), mPSOs["ssaoBlur"].Get());
@@ -395,7 +411,10 @@ void MainApp::CreateRtvAndDsvDescriptorHeaps()
 void MainApp::OnResize()
 {
     D3DApp::OnResize();
-
+	if (engineEditor != nullptr)
+	{
+		engineEditor->mScreenViewport = &mScreenViewport;
+	}
 	mCamera.SetLens(0.25f*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
 	mSpectateCamera.SetLens(0.25f*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
 	BoundingFrustum::CreateFromMatrix(mCamFrustum, mCamera.GetProj());
@@ -411,14 +430,16 @@ void MainApp::OnResize()
 
 void MainApp::Update(const GameTimer& gt)
 {
+
 	// Cycle through the circular frame resource array.
 	mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
 	mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
+	engineEditor->SetCurrentFrameResource(mCurrFrameResource);
 
 
     OnKeyboardInput(gt);
 	
-
+	/*
 	auto currGUIVB = mCurrFrameResource->EditorGUIVB.get();
 
 	std::vector<Vertex> verts = CalculateVerts();
@@ -432,7 +453,7 @@ void MainApp::Update(const GameTimer& gt)
 
 	mainGUIgeometry->VertexBufferGPU = currGUIVB->Resource();
 
-
+	*/
     // Has the GPU finished processing the commands of the current frame resource?
     // If not, wait until the GPU has completed commands up to this fence point.
     if(mCurrFrameResource->Fence != 0 && mFence->GetCompletedValue() < mCurrFrameResource->Fence)
@@ -442,22 +463,25 @@ void MainApp::Update(const GameTimer& gt)
         WaitForSingleObject(eventHandle, INFINITE);
         CloseHandle(eventHandle);
     }
-
+	assert(engineEditor != nullptr);
+	engineEditor->Update(gt);
 
 	AnimateMaterials(gt);
 	
 	UpdateInstanceData(gt);
-	UpdateGUIdata(gt);
+
 	UpdateMaterialBuffer(gt);
     UpdateShadowTransform(gt);
 	UpdatePlayerPassCB(gt);
     UpdateShadowPassCB(gt);
 	UpdateSpectatePassCB(gt);
 	UpdateSsaoCB(gt);
+
 }
 
 void MainApp::Draw(const GameTimer& gt)
 {
+
     auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
 
     // Reuse the memory associated with command recording.
@@ -548,7 +572,11 @@ void MainApp::Draw(const GameTimer& gt)
 
 	mCommandList->SetPipelineState(mPSOs["sky"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
-
+	if (mCurrentEngineState == engineState::Editor)
+	{
+		engineEditor->Draw(gt);
+	}
+	/*
 	mCommandList->SetPipelineState(mPSOs["EditorGUI"].Get());
 	DrawEditorGUI(mCommandList.Get());
 	if (!fontVertices.empty())
@@ -556,6 +584,7 @@ void MainApp::Draw(const GameTimer& gt)
 		mCommandList->SetPipelineState(mPSOs["FontShader"].Get());
 		DrawTextGUI(mCommandList.Get());
 	}
+	*/
     // Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
@@ -578,6 +607,7 @@ void MainApp::Draw(const GameTimer& gt)
     // Because we are on the GPU timeline, the new fence point won't be 
     // set until the GPU finishes processing all the commands prior to this Signal().
     mCommandQueue->Signal(mFence.Get(), mCurrentFence);
+
 }
 
 void MainApp::OnMouseDown(WPARAM btnState, int x, int y)
@@ -585,69 +615,121 @@ void MainApp::OnMouseDown(WPARAM btnState, int x, int y)
 
     mLastMousePos.x = x;
     mLastMousePos.y = y;
-	CheckGuiInteraction(x, y);
-	
+	if (mCurrentEngineState == engineState::Editor)
+	{
+		engineEditor->CheckGUIInteraction(x, y);
+	}
+	SelectWorldObject(x, y);
 
     SetCapture(mhMainWnd);
 }
 
-void MainApp::OnMouseUp(WPARAM btnState, int x, int y)
+void MainApp::OnMouseWheelScroll(WPARAM btnState)
 {
-	//check if an instance of the object has already been created
-	//if there is no created instance, create the object
-	//if there is a created instance, resize the object's instance array, increase its instance count and set the last instance 
-	/*
-	bool contains = false;
-	UINT index;
-	for (UINT i = 0; i < (UINT)mImmerseObjects.size(); i++)
+	int wheelDelta = GET_WHEEL_DELTA_WPARAM(btnState);
+	if (mCurrentEngineState == engineState::Editor)
 	{
-		if (mImmerseObjects[i].get()->name == "testBox")
+		if (wheelDelta > 0)
 		{
-			index = i;
-			contains = true;
-			break;
-
+			engineEditor->CheckGUIInteraction(true);
+		}
+		else
+		{
+			engineEditor->CheckGUIInteraction(false);
 		}
 	}
-	if (!contains)
-	{
-		auto testObject = std::make_unique<ImmerseObject>(
-			"testBox",
-			XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f),
-			XMMatrixScaling(1.0f, 1.0f, 1.0f),
-			mMaterials["bricks0"].get(),
-			mGeometries["shapeGeo"].get(),
-			mGeometries["shapeGeo"].get()->DrawArgs["box"].IndexCount,
-			mGeometries["shapeGeo"].get()->DrawArgs["box"].StartIndexLocation,
-			mGeometries["shapeGeo"].get()->DrawArgs["box"].BaseVertexLocation,
-			0,
-			1
-			);
-		
-		mAllImmerseObjects.push_back(testObject.get());
-		mImmerseObjects.push_back(std::move(testObject));
-	}
-	else
-	{
-		
-		auto blah = mImmerseObjects[index].get();
-		blah->InstanceCount += 1;
-		blah->Instances.resize(blah->Instances.size() + 1);
-		XMStoreFloat4x4(&blah->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
-		XMStoreFloat4x4(&blah->Instances.back().TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
-		blah->Instances.back().MaterialIndex = 0;
-		
-	}
-	*/
+}
 
-	/*
-	auto test = mAllRitems[3].get();
-	test->Instances.resize(test->Instances.size() + 1);
-	XMStoreFloat4x4(&test->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
-	XMStoreFloat4x4(&test->Instances.back().TexTransform, XMMatrixScaling(1.5f, 2.0f, 1.0f));
-	test->Instances.back().MaterialIndex = 0;
+void MainApp::OnEditorInteraction(std::string info)
+{
+	if (mCurrentEngineState == engineState::Editor)
+	{
+		if (info == "SpawnObject")
+		{
+			SpawnObject();
+			//OutputDebugStringW(L"Hello There");
+		}
+	}
+
+}
+
+void MainApp::SelectWorldObject(int sx, int sy)
+{
+	XMFLOAT4X4 P = mCamera.GetProj4x4f();
+
+	// Compute picking ray in view space.
+	float vx = (+2.0f*sx / mClientWidth - 1.0f) / P(0, 0);
+	float vy = (-2.0f*sy / mClientHeight + 1.0f) / P(1, 1);
+
+	// Ray definition in view space.
+	XMVECTOR rayOrigin = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+	XMVECTOR rayDir = XMVectorSet(vx, vy, 1.0f, 0.0f);
+
+	XMMATRIX V = mCamera.GetView();
+	XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(V), V);
+
+	for (auto object : mAllImmerseObjects)
+	{
+		XMMATRIX W = XMLoadFloat4x4(&object->World);
+		XMMATRIX invWorld = XMMatrixInverse(&XMMatrixDeterminant(W), W);
+
+		// Tranform ray to vi space of Mesh.
+		XMMATRIX toLocal = XMMatrixMultiply(invView, invWorld);
+
+		rayOrigin = XMVector3TransformCoord(rayOrigin, toLocal);
+		rayDir = XMVector3TransformNormal(rayDir, toLocal);
+
+		// Make the ray direction unit length for the intersection tests.
+		rayDir = XMVector3Normalize(rayDir);
+
+		// If we hit the bounding box of the Mesh, then we might have picked a Mesh triangle,
+		// so do the ray/triangle tests.
+		//
+		// If we did not hit the bounding box, then it is impossible that we hit 
+		// the Mesh, so do not waste effort doing ray/triangle tests.
+		float tmin = 0.0f;
+		if (object->Bounds.Intersects(rayOrigin, rayDir, tmin))
+		{
+			OutputDebugStringW(L"Clicked some object!!!!");
+			if (object->name == "testBox")
+			{
+				OutputDebugStringW(L"Clicked on a box!!!!");
+			}
+		}
+
+	}
+
+
+
+}
+
+DirectX::BoundingBox MainApp::CalculateSubmeshBounds(GeometryGenerator::MeshData meshData)
+{
+	XMFLOAT3 vMinf3(+MathHelper::Infinity, +MathHelper::Infinity, +MathHelper::Infinity);
+	XMFLOAT3 vMaxf3(-MathHelper::Infinity, -MathHelper::Infinity, -MathHelper::Infinity);
+
+	XMVECTOR vMin = XMLoadFloat3(&vMinf3);
+	XMVECTOR vMax = XMLoadFloat3(&vMaxf3);
 	
-	*/
+	for (int i = 0; i < (int)meshData.Vertices.size(); i++)
+	{
+		auto vert = meshData.Vertices[i];
+		XMVECTOR P = XMLoadFloat3(&vert.Position);
+		vMin = XMVectorMin(vMin, P);
+		vMax = XMVectorMax(vMax, P);
+	}
+
+	BoundingBox bounds;
+	XMStoreFloat3(&bounds.Center, 0.5f*(vMin + vMax));
+	XMStoreFloat3(&bounds.Extents, 0.5f*(vMax - vMin));
+
+
+
+	return bounds;
+}
+
+void MainApp::OnMouseUp(WPARAM btnState, int x, int y)
+{
 	
     ReleaseCapture();
 }
@@ -666,6 +748,23 @@ void MainApp::OnMouseMove(WPARAM btnState, int x, int y)
 
     mLastMousePos.x = x;
     mLastMousePos.y = y;
+}
+
+void MainApp::OnKeyDown(WPARAM btnState)
+{
+	if (btnState == 0x50)
+	{
+		
+		std::string output = " PRESSED P ";
+		if (mCurrentEngineState == engineState::Editor)
+		{
+			mCurrentEngineState = engineState::Play;
+		}
+
+		std::wstring temp(output.begin(), output.end());
+		OutputDebugStringW(temp.c_str());
+		
+	}
 }
  
 void MainApp::OnKeyboardInput(const GameTimer& gt)
@@ -793,81 +892,7 @@ void MainApp::UpdateInstanceData(const GameTimer & gt)
 	
 	
 }
-void MainApp::UpdateGUIdata(const GameTimer & gt)
-{
-	
-	for (auto& g : mainGUIgeometry->subGeos)
-	{
-		int visableGUIcount = 0;
-		auto gui = g->myGUI;
-		auto currGUIdataBuffer = mCurrFrameResource->GUIdataBuffers[gui->bufferIndex].get();
-		
-		GUIdata tempGUIdata;
-		tempGUIdata.color = gui->color;
-		currGUIdataBuffer->CopyData(visableGUIcount++, tempGUIdata);
-	}
 
-	auto currFontVB = mCurrFrameResource->fontVB.get();
-
-	
-	for (auto immerseText : mImmerseTextObjects)
-	{
-
-
-		if (immerseText->bVisible)
-		{
-			immerseText->instanceCount = 1;
-		}
-		else
-		{
-			immerseText->instanceCount = 0;
-			/*
-			std::string output = " INVIS ";
-
-			
-			std::wstring temp(output.begin(), output.end());
-			OutputDebugStringW(temp.c_str());
-			*/
-		}
-		for (UINT i = 0; i < (UINT)immerseText->myVerticesPos.size(); i++)
-		{
-			
-			Vertex vert;
-
-			vert.Pos = immerseText->myVerticesPos[i];
-
-			vert.TexC = immerseText->myVerticesTex[i];
-			/*
-			std::string output = "working: " + std::to_string(vert.Pos.x);
-			output += " ";
-
-			std::wstring temp(output.begin(), output.end());
-			OutputDebugStringW(temp.c_str());
-			*/
-			//vertsToRender.push_back(vert);
-			
-			currFontVB->CopyData(i, vert);
-			
-		}
-	}
-	/*
-	for (UINT i = 0; i < (UINT)vertsToRender.size(); i++)
-	{
-		Vertex vert = vertsToRender[i];
-		currFontVB->CopyData(i, vert);
-	}
-	*/
-	/*
-	for (UINT i = 0; i < (UINT)fontVertices.size(); i++)
-	{
-		Vertex vert = fontVertices[i];
-		currFontVB->CopyData(i, vert);
-	}
-	*/
-	mainFont->VertexBufferGPU = currFontVB->Resource();
-
-
-}
 void MainApp::UpdateMaterialBuffer(const GameTimer& gt)
 {
 	auto currMaterialBuffer = mCurrFrameResource->MaterialBuffer.get();
@@ -1085,91 +1110,66 @@ void MainApp::UpdateShadowPassCB(const GameTimer& gt)
     currPassCB->CopyData(1, mShadowPassCB);
 }
 
-void MainApp::CheckGuiInteraction(int x, int y)
+void MainApp::SpawnObject()
 {
-
-	for (UINT i = 0; i < (UINT)mainGUIgeometry->subGeos.size(); i++)
+	//check if an instance of the object has already been created
+	//if there is no created instance, create the object
+	//if there is a created instance, resize the object's instance array, increase its instance count and set the last instance 
+	
+	bool contains = false;
+	UINT index;
+	for (UINT i = 0; i < (UINT)mImmerseObjects.size(); i++)
 	{
-		auto gui = mainGUIgeometry->subGeos[i];
-		float guiX = gui->myGUI->x;
-		float guiY = gui->myGUI->y;
-		float guiWidth = gui->myGUI->width;
-		float guiHeight = gui->myGUI->height;
-		float mouseXndc = (2.0f * x) / (mScreenViewport.Width) - 1;
-		float mouseYndc = -(2.0f * y) / (mScreenViewport.Height) + 1;
-		/*
-		std::string pi = "guiX: " + std::to_string(guiX);
-		pi += " guiY: " + std::to_string(guiY);
-		pi += " guiWidth: " + std::to_string(guiWidth);
-		pi += " guiHeight: " + std::to_string(guiHeight);
-		pi += " mouseXndc: " + std::to_string(mouseXndc);
-		pi += " mouseYndc: " + std::to_string(mouseYndc);
-		pi += "  ";
-		std::wstring stemp = std::wstring(pi.begin(), pi.end());
-		LPCWSTR sw = stemp.c_str();
-		OutputDebugString(sw);
-		OutputDebugStringW(L"\n");
-		*/
-
-		if (guiX < mouseXndc && guiY > mouseYndc && guiX + guiWidth > mouseXndc && guiY - guiHeight < mouseYndc)
+		if (mImmerseObjects[i].get()->name == "testBox")
 		{
-			
-			//gui->myGUI->color = DirectX::XMFLOAT4{ 0.0,0.0,0.0,1.0 };
-			BaseGUI* temp = gui->myGUI;
-			PanelGUI* checkPanel = dynamic_cast<PanelGUI*>(temp);
-			if (checkPanel != nullptr)
-			{
-				if (!checkPanel->bIsClosed)
-				{
-					checkPanel->ChangeSize(true);
-					if (checkPanel->myTitle != nullptr)
-					{
-						checkPanel->myTitle->bVisible = false;
-					}
-				}
-				else
-				{
-					checkPanel->ChangeSize(false);
-					if (checkPanel->myTitle != nullptr)
-					{
-						checkPanel->myTitle->bVisible = true;
-					}
-					else
-					{
+			index = i;
+			contains = true;
+			break;
 
-						
-						std::string output = " NULL ";
-						
-
-						std::wstring temp(output.begin(), output.end());
-						OutputDebugStringW(temp.c_str());
-						
-
-					}
-				}
-				
-			}
-			/*
-			std::vector<Vertex> verts = CalculateVerts();
-
-			
-			for (UINT n = 0; n < (UINT)verts.size(); n++)
-			{
-				Vertex nVert = verts[n];
-				mCurrFrameResource->EditorGUIVB.get()->CopyData(n, nVert);
-			}
-
-			mainGUIgeometry->VertexBufferGPU = mCurrFrameResource->EditorGUIVB.get()->Resource();
-			*/
-			std::string pi = " Clicked A Button ";
-
-			std::wstring stemp = std::wstring(pi.begin(), pi.end());
-			LPCWSTR sw = stemp.c_str();
-			OutputDebugString(sw);
-			OutputDebugStringW(L"\n");
 		}
+	}
+	if (!contains)
+	{
+		auto testObject = std::make_unique<ImmerseObject>(
+		"testBox",
+		XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f),
+		XMMatrixScaling(1.0f, 1.0f, 1.0f),
+		mMaterials["bricks0"].get(),
+		mGeometries["shapeGeo"].get(),
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].IndexCount,
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].StartIndexLocation,
+		mGeometries["shapeGeo"].get()->DrawArgs["box"].BaseVertexLocation,
+		0,
+		1
+		);
+		testObject->Bounds = mGeometries["shapeGeo"].get()->DrawArgs["box"].Bounds;
+
+		mAllImmerseObjects.push_back(testObject.get());
+		mImmerseObjects.push_back(std::move(testObject));
+	}
+	else
+	{
+
+		auto blah = mImmerseObjects[index].get();
+		blah->InstanceCount += 1;
+		blah->Instances.resize(blah->Instances.size() + 1);
+		XMStoreFloat4x4(&blah->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
+		XMStoreFloat4x4(&blah->Instances.back().TexTransform, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+		blah->Instances.back().MaterialIndex = 0;
 
 	}
+	
+
+	/*
+	auto test = mAllRitems[3].get();
+	test->Instances.resize(test->Instances.size() + 1);
+	XMStoreFloat4x4(&test->Instances.back().World, XMMatrixScaling(2.0f, 2.0f, 2.0f)* DirectX::XMMatrixTranslationFromVector(mCamera.GetPosition() + XMVector3Normalize(mCamera.GetLook()) * 10.0f));
+	XMStoreFloat4x4(&test->Instances.back().TexTransform, XMMatrixScaling(1.5f, 2.0f, 1.0f));
+	test->Instances.back().MaterialIndex = 0;
+
+	*/
+
+	
 
 }
 
@@ -1217,13 +1217,13 @@ void MainApp::LoadTextures()
 			
 		mTextures[texMap->Name] = std::move(texMap);
 	}
-	fontTexture = std::make_unique<Texture>();
-	fontTexture->Name = "fontTexture";
-	fontTexture->Filename = L"Textures//Font1dds.dds";
+	engineEditor->fontTexture = std::make_unique<Texture>();
+	engineEditor->fontTexture->Name = "fontTexture";
+	engineEditor->fontTexture->Filename = L"Textures//Font1dds.dds";
 	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), fontTexture->Filename.c_str(),
-		fontTexture->Resource, fontTexture->UploadHeap));
-	mainFont = std::make_unique<ImmerseFont>("Font1", (int)fontTexture->Resource->GetDesc().Width, (int)fontTexture->Resource->GetDesc().Height);
+		mCommandList.Get(), engineEditor->fontTexture->Filename.c_str(),
+		engineEditor->fontTexture->Resource, engineEditor->fontTexture->UploadHeap));
+	engineEditor->mainFont = std::make_unique<ImmerseFont>("Font1", (int)engineEditor->fontTexture->Resource->GetDesc().Width, (int)engineEditor->fontTexture->Resource->GetDesc().Height);
 
 
 	testTexture = std::make_unique<Texture>();
@@ -1556,9 +1556,9 @@ void MainApp::BuildDescriptorHeaps()
     srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
    // md3dDevice->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
 	//nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
-	srvDesc.Format = fontTexture->Resource->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = fontTexture->Resource->GetDesc().MipLevels;
-	md3dDevice->CreateShaderResourceView(fontTexture->Resource.Get(), &srvDesc, nullSrv);
+	srvDesc.Format = engineEditor->fontTexture->Resource->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = engineEditor->fontTexture->Resource->GetDesc().MipLevels;
+	md3dDevice->CreateShaderResourceView(engineEditor->fontTexture->Resource.Get(), &srvDesc, nullSrv);
 	nullSrv.Offset(1, mCbvSrvUavDescriptorSize);
 	srvDesc.Format = testTexture->Resource->GetDesc().Format;
 	srvDesc.Texture2D.MipLevels = testTexture->Resource->GetDesc().MipLevels;
@@ -1641,7 +1641,7 @@ HRESULT MainApp::LoadFBX(std::vector<Vertex> &pOutVertexVector)
 				
 				FbxSurfaceMaterial* material = (FbxSurfaceMaterial*)pFbxChildNode->GetSrcObject<FbxSurfaceMaterial>(index);
 				
-				
+		
 
 				
 				if (material != NULL)
@@ -1908,35 +1908,41 @@ void MainApp::BuildShapeGeometry()
 	boxSubmesh.IndexCount = (UINT)box.Indices32.size();
 	boxSubmesh.StartIndexLocation = boxIndexOffset;
 	boxSubmesh.BaseVertexLocation = boxVertexOffset;
-
+	boxSubmesh.Bounds = CalculateSubmeshBounds(box);
 
 	SubmeshGeometry gridSubmesh;
 	gridSubmesh.IndexCount = (UINT)grid.Indices32.size();
 	gridSubmesh.StartIndexLocation = gridIndexOffset;
 	gridSubmesh.BaseVertexLocation = gridVertexOffset;
-
+	gridSubmesh.Bounds = CalculateSubmeshBounds(grid);
 
 	SubmeshGeometry sphereSubmesh;
 	sphereSubmesh.IndexCount = (UINT)sphere.Indices32.size();
 	sphereSubmesh.StartIndexLocation = sphereIndexOffset;
 	sphereSubmesh.BaseVertexLocation = sphereVertexOffset;
-
+	sphereSubmesh.Bounds = CalculateSubmeshBounds(sphere);
 
 	SubmeshGeometry cylinderSubmesh;
 	cylinderSubmesh.IndexCount = (UINT)cylinder.Indices32.size();
 	cylinderSubmesh.StartIndexLocation = cylinderIndexOffset;
 	cylinderSubmesh.BaseVertexLocation = cylinderVertexOffset;
+	cylinderSubmesh.Bounds = CalculateSubmeshBounds(cylinder);
 
 
     SubmeshGeometry quadSubmesh;
     quadSubmesh.IndexCount = (UINT)quad.Indices32.size();
     quadSubmesh.StartIndexLocation = quadIndexOffset;
     quadSubmesh.BaseVertexLocation = quadVertexOffset;
+	quadSubmesh.Bounds = CalculateSubmeshBounds(quad);
 
 	SubmeshGeometry wallSubmesh;
 	wallSubmesh.IndexCount = (UINT)wall.Indices32.size();
 	wallSubmesh.StartIndexLocation = wallIndexOffset;
 	wallSubmesh.BaseVertexLocation = wallVertexOffset;
+	wallSubmesh.Bounds = CalculateSubmeshBounds(wall);
+	
+
+
 
 
 	//
@@ -2393,18 +2399,7 @@ void MainApp::BuildPSOs()
     };
     ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&mPSOs["debug"])));
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC editorPsoDesc = debugPsoDesc;
-	editorPsoDesc.VS =
-	{
-		reinterpret_cast<BYTE*>(mShaders["editorVS"]->GetBufferPointer()),
-		mShaders["editorVS"]->GetBufferSize()
-	};
-	editorPsoDesc.PS =
-	{
-		reinterpret_cast<BYTE*>(mShaders["editorPS"]->GetBufferPointer()),
-		mShaders["editorPS"]->GetBufferSize()
-	};
-	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&editorPsoDesc, IID_PPV_ARGS(&mPSOs["EditorGUI"])));
+
 
 
 	D3D12_BLEND_DESC textBlendStateDesc = {};
@@ -2437,8 +2432,20 @@ void MainApp::BuildPSOs()
 		mShaders["fontPS"]->GetBufferSize()
 	};
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&fontPsoDesc, IID_PPV_ARGS(&mPSOs["FontShader"])));
-
-
+	
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC editorPsoDesc = fontPsoDesc;
+	editorPsoDesc.VS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["editorVS"]->GetBufferPointer()),
+		mShaders["editorVS"]->GetBufferSize()
+	};
+	editorPsoDesc.PS =
+	{
+		reinterpret_cast<BYTE*>(mShaders["editorPS"]->GetBufferPointer()),
+		mShaders["editorPS"]->GetBufferSize()
+	};
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&editorPsoDesc, IID_PPV_ARGS(&mPSOs["EditorGUI"])));
+	engineEditor->SetPSOs(mPSOs["EditorGUI"].Get(), mPSOs["FontShader"].Get());
 	//
 	// PSO for sky.
 	//
@@ -2585,6 +2592,7 @@ void MainApp::BuildRenderItems()
     quadRitem->IndexCount = quadRitem->Geo->DrawArgs["quad"].IndexCount;
     quadRitem->StartIndexLocation = quadRitem->Geo->DrawArgs["quad"].StartIndexLocation;
     quadRitem->BaseVertexLocation = quadRitem->Geo->DrawArgs["quad"].BaseVertexLocation;
+	quadRitem->Bounds = quadRitem->Geo->DrawArgs["quad"].Bounds;
 	quadRitem->Instances.resize(1);
 	quadRitem->instanceBufferIndex = 1;
 	quadRitem->bIs2D = true;
@@ -2650,7 +2658,7 @@ void MainApp::BuildRenderItems()
     gridRitem->IndexCount = gridRitem->Geo->DrawArgs["grid"].IndexCount;
     gridRitem->StartIndexLocation = gridRitem->Geo->DrawArgs["grid"].StartIndexLocation;
     gridRitem->BaseVertexLocation = gridRitem->Geo->DrawArgs["grid"].BaseVertexLocation;
-	
+	gridRitem->Bounds = gridRitem->Geo->DrawArgs["grid"].Bounds;
 	gridRitem->Instances.resize(1);
 	gridRitem->Instances[0].MaterialIndex = 5;
 	XMStoreFloat4x4(&gridRitem->Instances[0].TexTransform, XMMatrixScaling(8.0f, 8.0f, 1.0f));
@@ -2677,7 +2685,7 @@ void MainApp::BuildRenderItems()
 	leftCylRitem->IndexCount = leftCylRitem->Geo->DrawArgs["cylinder"].IndexCount;
 	leftCylRitem->StartIndexLocation = leftCylRitem->Geo->DrawArgs["cylinder"].StartIndexLocation;
 	leftCylRitem->BaseVertexLocation = leftCylRitem->Geo->DrawArgs["cylinder"].BaseVertexLocation;
-
+	leftCylRitem->Bounds = leftCylRitem->Geo->DrawArgs["cylinder"].Bounds;
 
 	leftCylRitem->Instances.resize(4);
 	leftCylRitem->InstanceCount = 4;
@@ -3090,7 +3098,7 @@ void MainApp::CreateMainFont()
 	mainFont->VertexBufferByteSize = vbByteSize;
 	mainFont->IndexFormat = DXGI_FORMAT_R16_UINT;;
 	mainFont->IndexBufferByteSize = ibByteSize;
-	CreateText(std::string("hello"), XMFLOAT2(0.f, 0.f), 7.0f);
+	//CreateText(std::string("hello"), XMFLOAT2(0.f, 0.f), 7.0f);
 }
 
 void MainApp::CreateText(std::string & text, XMFLOAT2 position, float fontSize, XMFLOAT4 color)
@@ -3098,7 +3106,7 @@ void MainApp::CreateText(std::string & text, XMFLOAT2 position, float fontSize, 
 	float xWidth = fontSize / 142.857142857f;
 	float yHeight = fontSize / 100.0f;
 	auto parentGui = mainGUIgeometry->subGeos[0]->myGUI;
-	ImmerseText* immerseText = new ImmerseText(text, 0, parentGui);
+	ImmerseText* immerseText = new ImmerseText(text, 0,0, parentGui);
 	
 	XMFLOAT2 textPosition = XMFLOAT2(parentGui->x + position.x,parentGui->y + position.y); //position is offset from gui position
 	for (int i = 0; i < text.length();i++)
@@ -3107,10 +3115,10 @@ void MainApp::CreateText(std::string & text, XMFLOAT2 position, float fontSize, 
 		XMFLOAT4 test = mainFont->MapGlyphQuad(c);
 
 		Vertex vert1;
-		float u = test.x / (float)fontTexture->Resource->GetDesc().Width;
-		float v = test.y / (float)fontTexture->Resource->GetDesc().Height;
-		float h = test.w / (float)fontTexture->Resource->GetDesc().Height;
-		float w = test.z / (float)fontTexture->Resource->GetDesc().Width;
+		float u = test.x / (float)engineEditor->fontTexture->Resource->GetDesc().Width;
+		float v = test.y / (float)engineEditor->fontTexture->Resource->GetDesc().Height;
+		float h = test.w / (float)engineEditor->fontTexture->Resource->GetDesc().Height;
+		float w = test.z / (float)engineEditor->fontTexture->Resource->GetDesc().Width;
 		vert1.TexC = XMFLOAT2(u, v);
 
 		vert1.Pos = XMFLOAT3(textPosition.x, textPosition.y, 0.0f);
@@ -3189,7 +3197,7 @@ void MainApp::DrawTextGUI(ID3D12GraphicsCommandList * cmdList)
 		cmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		cmdList->DrawIndexedInstanced(immerseText->indexCount, immerseText->instanceCount, immerseText->indexBufferIndex, (int)immerseText->vertexBufferIndex, 0);
 	}
-	//cmdList->DrawInstanced(4, 1, 0, 0);
+	
 		
 
 

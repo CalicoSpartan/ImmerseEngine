@@ -1,4 +1,5 @@
 #include "PanelGUI.h"
+#include "ImmerseText.h"
 
 PanelGUI::PanelGUI(float x, float y, float width, float height)
 {
@@ -51,7 +52,18 @@ PanelGUI::PanelGUI(float x, float y, float width, float height)
 	position.x = x;
 	position.y = y;
 	ChangeSize(bIsClosed);
+	instanceCount = 1;
 	
+}
+
+void PanelGUI::OnInvisible(bool bVisible)
+{
+	bIsVisible = bVisible;
+
+	if (myTitle != nullptr)
+	{
+		myTitle->bIsVisible = bVisible;
+	}
 }
 
 void PanelGUI::ChangeSize(bool bClose)
@@ -62,7 +74,19 @@ void PanelGUI::ChangeSize(bool bClose)
 		meshData.Vertices[3].Position = XMFLOAT3(x + width, y - height, 0.0f);
 		meshData.Vertices[0].Position = XMFLOAT3(x, y - height, 0.0f);
 		bIsClosed = true;
-		
+		for (auto n : scrollBoxes)
+		{
+			
+			n->OnInvisible(false);
+		}
+		for (auto n : buttons)
+		{
+			n->OnInvisible(false);
+		}
+		if (myTitle != nullptr)
+		{
+			//myTitle->bVisible = false;
+		}
 		
 	}
 	else
@@ -71,6 +95,18 @@ void PanelGUI::ChangeSize(bool bClose)
 		meshData.Vertices[3].Position = XMFLOAT3(x + width, y - height, 0.0f);
 		meshData.Vertices[0].Position = XMFLOAT3(x, y - height, 0.0f);
 		bIsClosed = false;
-		
+		for (auto n : scrollBoxes)
+		{
+			n->OnInvisible(true);
+			
+		}
+		for (auto n : buttons)
+		{
+			n->OnInvisible(true);
+		}
+		if (myTitle != nullptr)
+		{
+			//myTitle->bVisible = true;
+		}
 	}
 }

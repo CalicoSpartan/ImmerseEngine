@@ -5,6 +5,7 @@
 #include "ImmerseFont.h"
 #include "ImmerseText.h"
 #include "PanelGUI.h"
+#include "Editor.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;

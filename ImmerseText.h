@@ -11,8 +11,8 @@ using namespace DirectX::PackedVector;
 class ImmerseText
 {
 public:
-	ImmerseText(std::string& text = std::string("NULL"), UINT vertexBufferIndex = 0, BaseGUI* ParentGUI = nullptr);
-	bool bVisible = true;
+	ImmerseText(std::string& text = std::string("NULL"), UINT vertexBufferIndex = 0, UINT indexBufferIndex = 0, BaseGUI* ParentGUI = nullptr);
+	bool bIsVisible = true;
 	BaseGUI* ParentGUI = nullptr;
 	std::string myText = "NULL";
 	UINT vertexBufferIndex = 0;
